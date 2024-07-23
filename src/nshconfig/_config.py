@@ -1,14 +1,8 @@
 from collections.abc import Mapping, MutableMapping
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict
-from pydantic import Field as Field
-from pydantic import PrivateAttr as PrivateAttr
+from pydantic import BaseModel, ConfigDict, PrivateAttr
 from typing_extensions import deprecated, override
-
-from ._missing import MISSING, validate_no_missing_values
-from ._missing import AllowMissing as AllowMissing
-from ._missing import MissingField as MissingField
 
 _MutableMappingBase = MutableMapping[str, Any]
 if TYPE_CHECKING:
@@ -18,7 +12,7 @@ if TYPE_CHECKING:
 _DraftConfigContextSentinel = object()
 
 
-class TypedConfig(BaseModel, _MutableMappingBase):
+class Config(BaseModel, _MutableMappingBase):
     _is_draft_config: bool = PrivateAttr(default=False)
     """
     Whether this config is a draft config or not.
@@ -41,11 +35,6 @@ class TypedConfig(BaseModel, _MutableMappingBase):
     repr_diff_only: ClassVar[bool] = True
     """
     If `True`, the repr methods will only show values for fields that are different from the default.
-    """
-
-    MISSING: ClassVar[Any] = MISSING
-    """
-    Alias for the `MISSING` constant.
     """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(
@@ -119,12 +108,6 @@ class TypedConfig(BaseModel, _MutableMappingBase):
 
         self.__post_init__()
 
-        # After `_post_init__` is called, we perform the final round of validation
-        self.model_post_init_validate()
-
-    def model_post_init_validate(self):
-        validate_no_missing_values(self)
-
     @classmethod
     def model_construct_draft(cls, _fields_set: set[str] | None = None, **values: Any):
         """
@@ -139,10 +122,10 @@ class TypedConfig(BaseModel, _MutableMappingBase):
         Default values are respected, but no other validation is performed.
 
         !!! note
-            `model_construct()` generally respects the `model_extra` setting on the provided model.
-            That is, if `model_extra == 'allow'`, then all extra passed values are added to the model instance's `__dict__`
-            and `__pydantic_extra__` fields. If `model_extra == 'ignore'` (the default), then all extra passed values are ignored.
-            Because no validation is performed with a call to `model_construct()`, having `model_extra == 'forbid'` does not result in
+            `model_construct()` generally respects the `model_config.extra` setting on the provided model.
+            That is, if `model_config.extra == 'allow'`, then all extra passed values are added to the model instance's `__dict__`
+            and `__pydantic_extra__` fields. If `model_config.extra == 'ignore'` (the default), then all extra passed values are ignored.
+            Because no validation is performed with a call to `model_construct()`, having `model_config.extra == 'forbid'` does not result in
             an error if extra values are passed, but they will be ignored.
 
         Args:
@@ -172,7 +155,7 @@ class TypedConfig(BaseModel, _MutableMappingBase):
             _fields_set = fields_set
 
         _extra: dict[str, Any] | None = None
-        if cls.model_get("extra") == "allow":
+        if cls.model_config.get("extra") == "allow":
             _extra = {}
             for k, v in values.items():
                 _extra[k] = v
