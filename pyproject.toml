@@ -1,12 +1,12 @@
 [tool.poetry]
 name = "nshconfig"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fully typed configuration management, powered by Pydantic"
 authors = ["Nima Shoghi <nimashoghi@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = "^3.8"
 pydantic = "*"
 
 

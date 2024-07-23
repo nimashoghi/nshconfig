@@ -11,6 +11,9 @@ files = [
     {file = "annotated_types-0.7.0.tar.gz", hash = "sha256:aff07c09a53a08bc8cfccb9c85b05f1aa9a2a6f23728d790723543408344ce89"},
 ]
 
+[package.dependencies]
+typing-extensions = {version = ">=4.0.0", markers = "python_version < \"3.9\""}
+
 [[package]]
 name = "pydantic"
 version = "2.8.2"
@@ -147,5 +150,5 @@ files = [
 
 [metadata]
 lock-version = "2.0"
-python-versions = "^3.10"
-content-hash = "5b81ada1e0a71a77acf8151931c93927d424d4fc29809bb6dfaf5cf048477271"
+python-versions = "^3.8"
+content-hash = "a4057379633ebdaacea5edc122830140479a438dc0ca74de1c543e81bf6dfd24"
