@@ -4,6 +4,9 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 from typing_extensions import deprecated, override
 
+from ._missing import MISSING as _MISSING
+from ._missing import validate_no_missing_values
+
 _MutableMappingBase = MutableMapping[str, Any]
 if TYPE_CHECKING:
     _MutableMappingBase = object
@@ -35,6 +38,11 @@ class Config(BaseModel, _MutableMappingBase):
     repr_diff_only: ClassVar[bool] = True
     """
     If `True`, the repr methods will only show values for fields that are different from the default.
+    """
+
+    MISSING: ClassVar[Any] = _MISSING
+    """
+    Alias for the `MISSING` constant.
     """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(
@@ -107,6 +115,12 @@ class Config(BaseModel, _MutableMappingBase):
             return
 
         self.__post_init__()
+
+        # After `_post_init__` is called, we perform the final round of validation
+        self.model_post_init_validate()
+
+    def model_post_init_validate(self):
+        validate_no_missing_values(self)
 
     @classmethod
     def model_construct_draft(cls, _fields_set: set[str] | None = None, **values: Any):
