@@ -27,7 +27,6 @@ strictListInference = true
 strictDictionaryInference = true
 strictSetInference = true
 reportPrivateImportUsage = false
-ignore = ["./build/"]
 
 [tool.ruff.lint]
 ignore = ["F722", "F821", "E731", "E741"]
