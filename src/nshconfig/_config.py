@@ -1,5 +1,6 @@
+import contextlib
 from collections.abc import Mapping, MutableMapping
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 from typing_extensions import deprecated, override
@@ -34,6 +35,12 @@ class Config(BaseModel, _MutableMappingBase):
         config = config.finalize()
         ```
     """
+
+    if not TYPE_CHECKING:
+        _no_validate_assignment_for_draft: bool = True
+        """
+        Whether to validate assignments when setting values on a draft config.
+        """
 
     repr_diff_only: ClassVar[bool] = True
     """
@@ -195,6 +202,31 @@ class Config(BaseModel, _MutableMappingBase):
             object.__setattr__(m, "__pydantic_private__", None)
 
         return m
+
+    @contextlib.contextmanager
+    def __patch_validator_validate_assignment(self):
+        prev_value = self.model_config.get("validate_assignment", _notset := object())
+        try:
+            # We temporarily disable the validation of assignments
+            self.model_config["validate_assignment"] = False
+            yield
+        finally:
+            # We re-enable the validation of assignments
+            if prev_value is _notset:
+                del self.model_config["validate_assignment"]
+            else:
+                self.model_config["validate_assignment"] = cast(Any, prev_value)
+
+    if not TYPE_CHECKING:
+
+        @override
+        def __setattr__(self, name: str, value: Any) -> None:
+            __tracebackhide__ = True
+
+            with contextlib.ExitStack() as stack:
+                if self._is_draft_config and self._no_validate_assignment_for_draft:
+                    stack.enter_context(self.__patch_validator_validate_assignment())
+                return super().__setattr__(name, value)
 
     @override
     def __repr_args__(self):
