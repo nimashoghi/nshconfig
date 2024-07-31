@@ -224,10 +224,6 @@ class Config(BaseModel, _MutableMappingBase):
         # This is mainly so the config can be used with lightning's hparams
         #   transparently and without any issues.
 
-        @property
-        def _ll_dict(self):
-            return self.model_dump()
-
         # We need to make sure every config class
         #   is a MutableMapping[str, Any] so that it can be used
         #   with lightning's hparams.
