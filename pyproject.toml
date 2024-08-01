@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "nshconfig"
-version = "0.5.0"
+version = "0.6.0"
 description = "Fully typed configuration management, powered by Pydantic"
 authors = ["Nima Shoghi <nimashoghi@gmail.com>"]
 readme = "README.md"
@@ -30,3 +30,6 @@ reportPrivateImportUsage = false
 
 [tool.ruff.lint]
 ignore = ["F722", "F821", "E731", "E741"]
+
+[tool.poetry.extras]
+extra = []
