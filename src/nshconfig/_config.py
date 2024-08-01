@@ -256,6 +256,10 @@ class Config(BaseModel, _MutableMappingBase):
         # This is mainly so the config can be used with lightning's hparams
         #   transparently and without any issues.
 
+        @property
+        def _nshconfig_dict(self):
+            return self.model_dump()
+
         # We need to make sure every config class
         #   is a MutableMapping[str, Any] so that it can be used
         #   with lightning's hparams.
@@ -264,7 +268,7 @@ class Config(BaseModel, _MutableMappingBase):
             # Key can be of the format "a.b.c"
             #   so we need to split it into a list of keys.
             [first_key, *rest_keys] = key.split(".")
-            value = self._ll_dict[first_key]
+            value = self._nshconfig_dict[first_key]
 
             for key in rest_keys:
                 if isinstance(value, Mapping):
@@ -280,12 +284,12 @@ class Config(BaseModel, _MutableMappingBase):
             #   so we need to split it into a list of keys.
             [first_key, *rest_keys] = key.split(".")
             if len(rest_keys) == 0:
-                self._ll_dict[first_key] = value
+                self._nshconfig_dict[first_key] = value
                 return
 
             # We need to traverse the keys until we reach the last key
             #   and then set the value
-            current_value = self._ll_dict[first_key]
+            current_value = self._nshconfig_dict[first_key]
             for key in rest_keys[:-1]:
                 if isinstance(current_value, Mapping):
                     current_value = current_value[key]
@@ -305,10 +309,10 @@ class Config(BaseModel, _MutableMappingBase):
 
         @override
         def __iter__(self):
-            return iter(self._ll_dict)
+            return iter(self._nshconfig_dict)
 
         @override
         def __len__(self):
-            return len(self._ll_dict)
+            return len(self._nshconfig_dict)
 
     # endregion
