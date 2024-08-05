@@ -1,6 +1,6 @@
 # nshconfig
 
-Fully typed configuration management, powered by Pydantic
+Fully typed configuration management, powered by [Pydantic](https://github.com/pydantic/pydantic/)
 
 ## Table of Contents <!-- omit in toc -->
 - [nshconfig](#nshconfig)
@@ -147,7 +147,7 @@ By using the `MISSING` constant, you can indicate that a field is not set during
 
 ## Credit
 
-`nshconfig` is built on top of the incredible `pydantic` library. Massive credit goes to the `pydantic` team for creating such a powerful and flexible tool for data validation and settings management.
+`nshconfig` is built on top of the incredible [`pydantic`](https://github.com/pydantic/pydantic/) library. Massive credit goes to the [`pydantic`](https://github.com/pydantic/pydantic/) team for creating such a powerful and flexible tool for data validation and settings management.
 
 ## Contributing
 
