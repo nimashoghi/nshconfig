@@ -2,26 +2,55 @@
 
 Fully typed configuration management, powered by Pydantic
 
+As a machine learning researcher, I often found myself running numerous training jobs with various hyperparameters for the models I was working on. Keeping track of these parameters in a fully typed manner became increasingly important. While the excellent `pydantic` library provided most of the functionality I needed, I wanted to add a few extra features to streamline my workflow. This led to the creation of `nshconfig`.
+
 ## Table of Contents <!-- omit in toc -->
 - [nshconfig](#nshconfig)
-    - [Motivation](#motivation)
-    - [Features](#features)
-        - [Draft Configs](#draft-configs)
-            - [Motivation](#motivation-1)
-            - [Usage Guide](#usage-guide)
-        - [MISSING Constant](#missing-constant)
-            - [Motivation](#motivation-2)
-        - [Seamless Integration with PyTorch Lightning](#seamless-integration-with-pytorch-lightning)
-    - [Credit](#credit)
     - [Installation](#installation)
     - [Usage](#usage)
+    - [Features](#features)
+        - [Draft Configs](#draft-configs)
+            - [Motivation](#motivation)
+            - [Usage Guide](#usage-guide)
+        - [MISSING Constant](#missing-constant)
+            - [Motivation](#motivation-1)
+        - [Seamless Integration with PyTorch Lightning](#seamless-integration-with-pytorch-lightning)
+    - [Credit](#credit)
     - [Contributing](#contributing)
     - [License](#license)
 
 
-## Motivation
+## Installation
 
-As a machine learning researcher, I often found myself running numerous training jobs with various hyperparameters for the models I was working on. Keeping track of these parameters in a fully typed manner became increasingly important. While the excellent `pydantic` library provided most of the functionality I needed, I wanted to add a few extra features to streamline my workflow. This led to the creation of `nshconfig`.
+You can install `nshconfig` via pip:
+
+```bash
+pip install nshconfig
+```
+
+## Usage
+
+While the primary use case for `nshconfig` is in machine learning projects, it can be used in any Python project where you need to store configurations in a fully typed manner.
+
+Here's a basic example of how to use `nshconfig`:
+
+```python
+import nshconfig as C
+
+class MyConfig(C.Config):
+    field1: int
+    field2: str
+    field3: C.AllowMissing[float] = C.MISSING
+
+config = MyConfig.draft()
+config.field1 = 42
+config.field2 = "hello"
+final_config = config.finalize()
+
+print(final_config)
+```
+
+For more advanced usage and examples, please refer to the documentation.
 
 ## Features
 
@@ -115,38 +144,6 @@ By using the `MISSING` constant, you can indicate that a field is not set during
 ## Credit
 
 `nshconfig` is built on top of the incredible `pydantic` library. Massive credit goes to the `pydantic` team for creating such a powerful and flexible tool for data validation and settings management.
-
-## Installation
-
-You can install `nshconfig` via pip:
-
-```bash
-pip install nshconfig
-```
-
-## Usage
-
-While the primary use case for `nshconfig` is in machine learning projects, it can be used in any Python project where you need to store configurations in a fully typed manner.
-
-Here's a basic example of how to use `nshconfig`:
-
-```python
-import nshconfig as C
-
-class MyConfig(C.Config):
-    field1: int
-    field2: str
-    field3: C.AllowMissing[float] = C.MISSING
-
-config = MyConfig.draft()
-config.field1 = 42
-config.field2 = "hello"
-final_config = config.finalize()
-
-print(final_config)
-```
-
-For more advanced usage and examples, please refer to the documentation.
 
 ## Contributing
 
