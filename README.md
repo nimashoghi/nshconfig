@@ -2,23 +2,6 @@
 
 Fully typed configuration management, powered by [Pydantic](https://github.com/pydantic/pydantic/)
 
-## Table of Contents <!-- omit in toc -->
-- [nshconfig](#nshconfig)
-    - [Motivation](#motivation)
-    - [Installation](#installation)
-    - [Usage](#usage)
-    - [Features](#features)
-        - [Draft Configs](#draft-configs)
-            - [Motivation](#motivation-1)
-            - [Usage Guide](#usage-guide)
-        - [MISSING Constant](#missing-constant)
-            - [Motivation](#motivation-2)
-        - [Seamless Integration with PyTorch Lightning](#seamless-integration-with-pytorch-lightning)
-    - [Credit](#credit)
-    - [Contributing](#contributing)
-    - [License](#license)
-
-
 ## Motivation
 
 As a machine learning researcher, I often found myself running numerous training jobs with various hyperparameters for the models I was working on. Keeping track of these parameters in a fully typed manner became increasingly important. While the excellent `pydantic` library provided most of the functionality I needed, I wanted to add a few extra features to streamline my workflow. This led to the creation of `nshconfig`.
