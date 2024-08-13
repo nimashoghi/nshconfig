@@ -1,4 +1,5 @@
 import contextlib
+import importlib.util
 from collections.abc import Mapping, MutableMapping
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
@@ -316,3 +317,32 @@ class Config(BaseModel, _MutableMappingBase):
             return len(self._nshconfig_dict)
 
     # endregion
+
+    # region `treescope` integration
+    def __treescope_repr__(self, path, subtree_renderer):
+        if importlib.util.find_spec("treescope") is None:
+            raise ImportError("The `treescope` package is required for this feature.")
+
+        from ._treescope_util import render_object_constructor
+
+        # For the attributes, let's first output the fields that are different from the default.
+        attributes = {}
+
+        # First, we get the default values for all fields.
+        default_values = self.model_construct_draft()
+
+        # Then, we compare the default values with the current values.
+        for k, v in super().__repr_args__():
+            if k is None:
+                continue
+
+            is_default = hasattr(default_values, k) and getattr(default_values, k) == v
+            attributes[k] = (v, is_default)
+
+        return render_object_constructor(
+            object_type=type(self),
+            attributes=attributes,
+            path=path,
+            subtree_renderer=subtree_renderer,
+            roundtrippable=True,
+        )
