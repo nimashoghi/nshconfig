@@ -38,6 +38,13 @@ def main():
         action=argparse.BooleanOptionalAction,
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--ignore-module",
+        action="append",
+        help="Ignore the given module",
+        default=[],
+        type=str,
+    )
     args = parser.parse_args()
 
     # Set up logging
@@ -45,7 +52,7 @@ def main():
     logging.basicConfig(level=level)
 
     # Find all modules to export
-    modules: list[str] = _find_modules(args.module, args.recursive)
+    modules: list[str] = _find_modules(args.module, args.recursive, args.ignore_module)
 
     # For each module, import it, find all subclasses of Config and export them
     config_cls_set = set[type[Config]]()
@@ -118,20 +125,24 @@ def main():
             pass
 
 
-def _find_modules(module_name: str, recursive: bool):
+def _find_modules(module_name: str, recursive: bool, ignore_modules: list[str]):
     # Find the module spec
     if (spec := importlib.util.find_spec(module_name)) is None:
         raise ImportError(f"Module {module_name} not found")
 
+    modules = []
+    if not any(module_name.startswith(ignore) for ignore in ignore_modules):
+        modules.append(module_name)
+
     if spec.submodule_search_locations is None:
-        return [module_name]
+        return modules
 
     # Find all submodules
     modules = [module_name]
     if recursive:
         for _, name, _ in pkgutil.walk_packages(spec.submodule_search_locations):
             submodule = f"{module_name}.{name}"
-            modules.extend(_find_modules(submodule, recursive))
+            modules.extend(_find_modules(submodule, recursive, ignore_modules))
 
     return modules
 
@@ -141,7 +152,7 @@ def _module_configs(module_name: str):
     module = importlib.import_module(module_name)
 
     # Find all subclasses of Config
-    for x, cls in inspect.getmembers(module, inspect.isclass):
+    for _, cls in inspect.getmembers(module, inspect.isclass):
         try:
             # Export subclasses of Config
             if issubclass(cls, Config):
