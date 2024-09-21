@@ -1,11 +1,15 @@
 import contextlib
 import importlib.util
+import inspect
+import json
 from collections.abc import Mapping, MutableMapping
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 from typing_extensions import deprecated, override
 
+from ._docs_extractor import extract_docstrings_from_cls, update_fields_from_docstrings
 from ._missing import MISSING as _MISSING
 from ._missing import validate_no_missing_values
 
@@ -346,3 +350,46 @@ class Config(BaseModel, _MutableMappingBase):
             subtree_renderer=subtree_renderer,
             roundtrippable=True,
         )
+
+    # endregion
+
+    # region JSON Schema
+
+    if TYPE_CHECKING:
+
+        @override
+        @classmethod
+        def __init_subclass__(
+            cls,
+            use_attributes_docstring: bool = True,
+            write_schema_to_file: bool = False,
+        ):
+            super().__init_subclass__()
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any):
+        use_attributes_docstring = kwargs.pop("use_attributes_docstring", True)
+        write_schema_to_file = kwargs.pop("write_schema_to_file", False)
+        super().__pydantic_init_subclass__()  # type: ignore
+
+        # Update the fields descriptions from the docstrings.
+        if use_attributes_docstring:
+            fields_docs = getattr(cls, "fields_docs", None)
+            if fields_docs is None:
+                fields_docs = {}
+            fields_docs = {**fields_docs, **extract_docstrings_from_cls(cls)}
+            setattr(cls, "fields_docs", fields_docs)
+
+            update_fields_from_docstrings(cls.model_fields, fields_docs)
+
+        # If requested, write the schema to a file.
+        if write_schema_to_file:
+            cls_file_path = inspect.getfile(cls)
+            if cls_file_path:
+                # Save the schema to a file with the same name as the class.
+                dest = Path(cls_file_path).with_suffix(f".{cls.__name__}.schema.json")
+                if cls.model_rebuild(force=True) is not False:
+                    json_schema = cls.model_json_schema()
+                    _ = dest.write_text(json.dumps(json_schema, indent=2))
+
+    # endregion
