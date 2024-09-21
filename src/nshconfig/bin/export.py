@@ -3,7 +3,6 @@ import importlib
 import importlib.util
 import inspect
 import logging
-import pkgutil
 from collections.abc import Iterable
 from pathlib import Path
 
