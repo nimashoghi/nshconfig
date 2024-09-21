@@ -147,20 +147,30 @@ def _find_modules(module_name: str, recursive: bool, ignore_modules: list[str]):
 
     module_dir = Path(spec.origin).parent
 
-    # Walk through the directory and find all Python files
-    for file_path in module_dir.rglob("*.py"):
-        if file_path.name != "__init__.py":
-            # Convert file path to module name
-            relative_path = file_path.relative_to(module_dir)
+    def add_module(path: Path, base_module: str):
+        relative_path = path.relative_to(module_dir)
+        if path.name == "__init__.py":
+            submodule_name = ".".join(relative_path.parent.parts)
+        else:
             submodule_name = ".".join(relative_path.with_suffix("").parts)
-            full_module_name = f"{module_name}.{submodule_name}"
 
-            if not any(
-                full_module_name.startswith(ignore) for ignore in ignore_modules
-            ):
-                modules.append(full_module_name)
-            else:
-                logging.debug(f"Ignoring module {full_module_name}")
+        full_module_name = (
+            f"{base_module}.{submodule_name}" if submodule_name else base_module
+        )
+
+        if not any(full_module_name.startswith(ignore) for ignore in ignore_modules):
+            modules.append(full_module_name)
+        else:
+            logging.debug(f"Ignoring module {full_module_name}")
+
+    # Walk through the directory
+    for file_path in module_dir.rglob("*.py"):
+        if file_path.name == "__init__.py":
+            # This is a package, add it
+            add_module(file_path, module_name)
+        elif not any(parent.name == "__init__.py" for parent in file_path.parents):
+            # This is a standalone Python file not within a package, add it
+            add_module(file_path, module_name)
 
     return modules
 
