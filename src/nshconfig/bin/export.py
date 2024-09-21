@@ -151,6 +151,21 @@ def _module_configs(module_name: str):
             continue
 
 
+def _is_export(metadata: Iterable):
+    for m in metadata:
+        # First check for Export() metadata.
+        if isinstance(m, Export):
+            return True
+
+        # Then, we check for any Pydantic metadata.
+        try:
+            modulebase = m.__module__.split(".", 1)[0]
+            if modulebase == "pydantic":
+                return True
+        except Exception:
+            continue
+
+
 def _alias_configs(module_name: str):
     # Import the module
     module = importlib.import_module(module_name)
@@ -162,8 +177,7 @@ def _alias_configs(module_name: str):
             if (
                 (metadata := getattr(obj, "__metadata__", None))
                 and isinstance(metadata, Iterable)
-                and (_ := next((m for m in metadata if isinstance(m, Export)), None))
-                is not None
+                and _is_export(metadata)
             ):
                 yield name, obj
 
