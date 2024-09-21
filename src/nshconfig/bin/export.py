@@ -7,8 +7,8 @@ import pkgutil
 from collections.abc import Iterable
 from pathlib import Path
 
-from .. import Config
-from .._export import Export
+from nshconfig import Config
+from nshconfig._export import Export
 
 
 def main():
@@ -50,6 +50,7 @@ def main():
     # Set up logging
     level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(level=level)
+    logging.debug(f"Arguments: {args}")
 
     # Find all modules to export
     modules: list[str] = _find_modules(args.module, args.recursive, args.ignore_module)
@@ -57,7 +58,9 @@ def main():
     # For each module, import it, find all subclasses of Config and export them
     config_cls_set = set[type[Config]]()
     for module_name in modules:
+        logging.debug(f"Exporting configurations from {module_name}")
         for config_cls in _module_configs(module_name):
+            logging.debug(f"Exporting {config_cls}")
             config_cls_set.add(config_cls)
 
     # Write to file
@@ -133,16 +136,32 @@ def _find_modules(module_name: str, recursive: bool, ignore_modules: list[str]):
     modules = []
     if not any(module_name.startswith(ignore) for ignore in ignore_modules):
         modules.append(module_name)
+    else:
+        logging.debug(f"Ignoring module {module_name}")
 
-    if spec.submodule_search_locations is None:
+    if not recursive:
         return modules
 
-    # Find all submodules
-    modules = [module_name]
-    if recursive:
-        for _, name, _ in pkgutil.walk_packages(spec.submodule_search_locations):
-            submodule = f"{module_name}.{name}"
-            modules.extend(_find_modules(submodule, recursive, ignore_modules))
+    # Find the directory containing the module
+    if spec.origin is None:
+        return modules
+
+    module_dir = Path(spec.origin).parent
+
+    # Walk through the directory and find all Python files
+    for file_path in module_dir.rglob("*.py"):
+        if file_path.name != "__init__.py":
+            # Convert file path to module name
+            relative_path = file_path.relative_to(module_dir)
+            submodule_name = ".".join(relative_path.with_suffix("").parts)
+            full_module_name = f"{module_name}.{submodule_name}"
+
+            if not any(
+                full_module_name.startswith(ignore) for ignore in ignore_modules
+            ):
+                modules.append(full_module_name)
+            else:
+                logging.debug(f"Ignoring module {full_module_name}")
 
     return modules
 
