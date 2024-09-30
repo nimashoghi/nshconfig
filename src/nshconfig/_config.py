@@ -6,8 +6,9 @@ from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-from pydantic import BaseModel, ConfigDict, PrivateAttr
-from typing_extensions import deprecated, override
+from pydantic import BaseModel, PrivateAttr
+from pydantic import ConfigDict as _ConfigDict
+from typing_extensions import override
 
 from ._docs_extractor import extract_docstrings_from_cls, update_fields_from_docstrings
 from ._missing import MISSING as _MISSING
@@ -21,10 +22,22 @@ if TYPE_CHECKING:
 _DraftConfigContextSentinel = object()
 
 
-class ConfigConfigDict(ConfigDict, total=False):
+class ConfigDict(_ConfigDict, total=False):
     repr_diff_only: bool
     """
     If `True`, the repr methods will only show values for fields that are different from the default.
+    Defaults to `False`.
+    """
+
+    use_attributes_docstring: bool
+    """
+    Whether to use the attributes docstrings to update the fields descriptions.
+    Defaults to `True`.
+    """
+
+    write_schema_to_file: bool
+    """
+    Whether to write the JSON schema to a file.
     Defaults to `False`.
     """
 
@@ -60,7 +73,7 @@ class Config(BaseModel, _MutableMappingBase):
     Alias for the `MISSING` constant.
     """
 
-    model_config: ClassVar[ConfigConfigDict] = ConfigConfigDict(  # type: ignore
+    model_config: ClassVar[ConfigDict] = ConfigDict(  # type: ignore
         # By default, Pydantic will throw a warning if a field starts with "model_",
         # so we need to disable that warning (beacuse "model_" is a popular prefix for ML).
         protected_namespaces=(),
@@ -82,11 +95,6 @@ class Config(BaseModel, _MutableMappingBase):
     def __post_init__(self):
         """Called after the final config is validated."""
         pass
-
-    @classmethod
-    @deprecated("Use `model_validate` instead.")
-    def from_dict(cls, model_dict: Mapping[str, Any]):
-        return cls.model_validate(model_dict)
 
     def model_deep_validate(self, strict: bool = True):
         """
@@ -357,26 +365,12 @@ class Config(BaseModel, _MutableMappingBase):
     # endregion
 
     # region JSON Schema
-
-    if TYPE_CHECKING:
-
-        @override
-        @classmethod
-        def __init_subclass__(
-            cls,
-            use_attributes_docstring: bool = True,
-            write_schema_to_file: bool = False,
-        ):
-            super().__init_subclass__()
-
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any):
-        use_attributes_docstring = kwargs.pop("use_attributes_docstring", True)
-        write_schema_to_file = kwargs.pop("write_schema_to_file", False)
-        super().__pydantic_init_subclass__()  # type: ignore
+        super().__pydantic_init_subclass__(**kwargs)
 
         # Update the fields descriptions from the docstrings.
-        if use_attributes_docstring:
+        if cls.model_config.get("use_attributes_docstring", True):
             fields_docs = getattr(cls, "fields_docs", None)
             if fields_docs is None:
                 fields_docs = {}
@@ -386,7 +380,7 @@ class Config(BaseModel, _MutableMappingBase):
             update_fields_from_docstrings(cls.model_fields, fields_docs)
 
         # If requested, write the schema to a file.
-        if write_schema_to_file:
+        if cls.model_config.get("write_schema_to_file", False):
             cls_file_path = inspect.getfile(cls)
             if cls_file_path:
                 # Save the schema to a file with the same name as the class.

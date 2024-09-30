@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "nshconfig"
-version = "0.15.0"
+version = "0.16.0"
 description = "Fully typed configuration management, powered by Pydantic"
 authors = ["Nima Shoghi <nimashoghi@gmail.com>"]
 readme = "README.md"
@@ -11,6 +11,7 @@ homepage = "https://github.com/nimashoghi/nshconfig"
 [tool.poetry.dependencies]
 python = "^3.10"
 pydantic = "*"
+pydantic-settings = "*"
 treescope = { version = "*", optional = true }
 
 [tool.poetry.group.dev.dependencies]
