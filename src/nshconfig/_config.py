@@ -21,6 +21,14 @@ if TYPE_CHECKING:
 _DraftConfigContextSentinel = object()
 
 
+class ConfigConfigDict(ConfigDict, total=False):
+    repr_diff_only: bool
+    """
+    If `True`, the repr methods will only show values for fields that are different from the default.
+    Defaults to `False`.
+    """
+
+
 class Config(BaseModel, _MutableMappingBase):
     _is_draft_config: bool = PrivateAttr(default=False)
     """
@@ -47,17 +55,12 @@ class Config(BaseModel, _MutableMappingBase):
         Whether to validate assignments when setting values on a draft config.
         """
 
-    repr_diff_only: ClassVar[bool] = True
-    """
-    If `True`, the repr methods will only show values for fields that are different from the default.
-    """
-
     MISSING: ClassVar[Any] = _MISSING
     """
     Alias for the `MISSING` constant.
     """
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(
+    model_config: ClassVar[ConfigConfigDict] = ConfigConfigDict(  # type: ignore
         # By default, Pydantic will throw a warning if a field starts with "model_",
         # so we need to disable that warning (beacuse "model_" is a popular prefix for ML).
         protected_namespaces=(),
@@ -236,7 +239,7 @@ class Config(BaseModel, _MutableMappingBase):
     @override
     def __repr_args__(self):
         # If `repr_diff_only` is `True`, we only show the fields that are different from the default.
-        if not self.repr_diff_only:
+        if not self.model_config.get("repr_diff_only", False):
             yield from super().__repr_args__()
             return
 
