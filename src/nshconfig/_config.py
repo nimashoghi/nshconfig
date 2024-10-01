@@ -8,9 +8,8 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pydantic import BaseModel, PrivateAttr
 from pydantic import ConfigDict as _ConfigDict
-from typing_extensions import override
+from typing_extensions import Unpack, override
 
-from ._docs_extractor import extract_docstrings_from_cls, update_fields_from_docstrings
 from ._missing import MISSING as _MISSING
 from ._missing import validate_no_missing_values
 
@@ -29,16 +28,16 @@ class ConfigDict(_ConfigDict, total=False):
     Defaults to `False`.
     """
 
-    use_attributes_docstring: bool
-    """
-    Whether to use the attributes docstrings to update the fields descriptions.
-    Defaults to `True`.
-    """
-
     write_schema_to_file: bool
     """
     Whether to write the JSON schema to a file.
     Defaults to `False`.
+    """
+
+    no_validate_assignment_for_draft: bool
+    """
+    Whether to disable the validation of assignments for draft configs.
+    Defaults to `True`.
     """
 
 
@@ -62,12 +61,6 @@ class Config(BaseModel, _MutableMappingBase):
         ```
     """
 
-    if not TYPE_CHECKING:
-        _no_validate_assignment_for_draft: bool = True
-        """
-        Whether to validate assignments when setting values on a draft config.
-        """
-
     MISSING: ClassVar[Any] = _MISSING
     """
     Alias for the `MISSING` constant.
@@ -87,6 +80,11 @@ class Config(BaseModel, _MutableMappingBase):
         validation_error_cause=True,
         use_attribute_docstrings=True,
     )
+
+    if TYPE_CHECKING:
+
+        def __init_subclass__(cls, **kwargs: Unpack[ConfigDict]):
+            super().__init_subclass__(**kwargs)
 
     def __draft_pre_init__(self):
         """Called right before a draft config is finalized."""
@@ -240,7 +238,9 @@ class Config(BaseModel, _MutableMappingBase):
             __tracebackhide__ = True
 
             with contextlib.ExitStack() as stack:
-                if self._is_draft_config and self._no_validate_assignment_for_draft:
+                if self._is_draft_config and self.model_config.get(
+                    "no_validate_assignment_for_draft", True
+                ):
                     stack.enter_context(self.__patch_validator_validate_assignment())
                 return super().__setattr__(name, value)
 
@@ -368,16 +368,6 @@ class Config(BaseModel, _MutableMappingBase):
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any):
         super().__pydantic_init_subclass__(**kwargs)
-
-        # Update the fields descriptions from the docstrings.
-        if cls.model_config.get("use_attributes_docstring", True):
-            fields_docs = getattr(cls, "fields_docs", None)
-            if fields_docs is None:
-                fields_docs = {}
-            fields_docs = {**fields_docs, **extract_docstrings_from_cls(cls)}
-            setattr(cls, "fields_docs", fields_docs)
-
-            update_fields_from_docstrings(cls.model_fields, fields_docs)
 
         # If requested, write the schema to a file.
         if cls.model_config.get("write_schema_to_file", False):

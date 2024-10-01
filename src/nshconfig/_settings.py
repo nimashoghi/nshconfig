@@ -1,7 +1,8 @@
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from pydantic_settings import BaseSettings
 from pydantic_settings import SettingsConfigDict as _SettingsConfigDict
+from typing_extensions import Unpack
 
 from ._config import Config
 
@@ -29,3 +30,8 @@ class Settings(BaseSettings, Config):
         validation_error_cause=True,
         use_attribute_docstrings=True,
     )
+
+    if TYPE_CHECKING:
+
+        def __init_subclass__(cls, **kwargs: Unpack[SettingsConfigDict]):
+            super().__init_subclass__(**kwargs)
