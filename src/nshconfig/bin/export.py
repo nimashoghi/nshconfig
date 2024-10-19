@@ -3,11 +3,15 @@ import importlib
 import importlib.util
 import inspect
 import logging
+import shutil
+from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 
 from nshconfig import Config
 from nshconfig._export import Export
+
+CODEGEN_MARKER = "__codegen__ = True"
 
 
 def main():
@@ -23,8 +27,14 @@ def main():
         "-o",
         "--output",
         type=Path,
-        help="The output file to write the configurations to, defaults to stdout",
-        required=False,
+        help="The output directory to write the configurations to",
+        required=True,
+    )
+    parser.add_argument(
+        "--remove-existing",
+        action=argparse.BooleanOptionalAction,
+        help="Remove existing export files before exporting",
+        default=True,
     )
     parser.add_argument(
         "--recursive",
@@ -55,76 +65,38 @@ def main():
     modules: list[str] = _find_modules(args.module, args.recursive, args.ignore_module)
 
     # For each module, import it, find all subclasses of Config and export them
-    config_cls_set = set[type[Config]]()
+    config_cls_dict = defaultdict(set)
+    alias_dict = defaultdict(dict)
     for module_name in modules:
+        if _is_generated_module(module_name):
+            logging.debug(f"Skipping generated module {module_name}")
+            continue
+
         logging.debug(f"Exporting configurations from {module_name}")
         for config_cls in _module_configs(module_name):
             logging.debug(f"Exporting {config_cls}")
-            config_cls_set.add(config_cls)
+            config_cls_dict[module_name].add(config_cls)
 
-    # Write to file
-    export_lines: list[str] = []
-    for config_cls in config_cls_set:
-        export_lines.append(
-            f"from {config_cls.__module__} import {config_cls.__name__} as {config_cls.__name__}"
-        )
-
-    # Same with type aliases
-    alises: dict[str, tuple[str, object]] = {}
-    for module_name in modules:
         for name, obj in _alias_configs(module_name):
-            # If the alias is already defined, replace it if
-            # the new alias is longer.
-            if (existing := alises.get(name)) is None:
-                alises[name] = (module_name, obj)
-                continue
+            alias_dict[module_name][name] = obj
 
-            existing_module, existing_obj = existing
-            # Throw an error if the objects are different
-            if existing_obj != obj:
-                raise ValueError(
-                    f"Type alias {name} is defined in both {existing_module} and {module_name}. "
-                    "However, the objects are different. "
-                    f"Existing: {existing_obj}, New: {obj}"
-                )
+    # Just remove the output directory if remove_existing is True
+    if args.remove_existing and args.output.exists():
+        if args.output.is_dir():
+            shutil.rmtree(args.output)
+        else:
+            args.output.unlink()
 
-            # Replace the alias if the new module is longer
-            if len(module_name) > len(existing_module):
-                alises[name] = (module_name, obj)
+    # Create export files
+    _create_export_files(args.output, args.module, config_cls_dict, alias_dict)
 
-    for name, (module_name, obj) in alises.items():
-        export_lines.append(f"from {module_name} import {name} as {name}")
 
-    # Sort the export lines
-    export_lines = sorted(export_lines)
-
-    # Write the export lines to the output file
-    if args.output:
-        with open(args.output, "w") as f:
-            for line in export_lines:
-                f.write(line + "\n")
-    else:
-        for line in export_lines:
-            print(line)
-
-    # If we have the 'ruff' package installed, we can use it to format
-    # the output file.
-    if args.output:
-        try:
-            import subprocess
-
-            import ruff
-
-            ruff  # type: ignore # to prevent unused import warning
-
-            if args.output:
-                subprocess.run(
-                    ["ruff", "format", str(args.output.absolute())],
-                    check=True,
-                )
-
-        except ImportError:
-            pass
+def _is_generated_module(module_name: str) -> bool:
+    try:
+        module = importlib.import_module(module_name)
+        return getattr(module, "__codegen__", False)
+    except ImportError:
+        return False
 
 
 def _find_modules(module_name: str, recursive: bool, ignore_modules: list[str]):
@@ -133,7 +105,9 @@ def _find_modules(module_name: str, recursive: bool, ignore_modules: list[str]):
         raise ImportError(f"Module {module_name} not found")
 
     modules = []
-    if not any(module_name.startswith(ignore) for ignore in ignore_modules):
+    if not any(
+        module_name.startswith(ignore) for ignore in ignore_modules
+    ) and not _is_generated_module(module_name):
         modules.append(module_name)
     else:
         logging.debug(f"Ignoring module {module_name}")
@@ -222,6 +196,132 @@ def _alias_configs(module_name: str):
 
         except TypeError:
             continue
+
+
+def _create_export_files(
+    output_dir: Path, base_module: str, config_cls_dict: dict, alias_dict: dict
+):
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create the root export file
+    _create_export_file(
+        output_dir / "__init__.py",
+        base_module,
+        config_cls_dict,
+        alias_dict,
+    )
+
+    # Create hierarchical export files
+    for module_name in config_cls_dict.keys():
+        if module_name == base_module:
+            continue
+        relative_path = module_name[len(base_module) + 1 :].replace(".", "/")
+        module_dir = output_dir / relative_path
+        module_dir.mkdir(parents=True, exist_ok=True)
+        _create_export_file(
+            module_dir / "__init__.py", module_name, config_cls_dict, alias_dict
+        )
+
+    # Format files using ruff if available
+    try:
+        import subprocess
+
+        import ruff
+
+        ruff  # type: ignore # to prevent unused import warning
+        subprocess.run(
+            ["ruff", "format", str(output_dir.absolute())],
+            check=True,
+        )
+    except ImportError:
+        pass
+
+
+def _create_export_file(
+    file_path: Path,
+    module_name: str,
+    config_cls_dict: dict,
+    alias_dict: dict,
+):
+    export_lines = []
+    lineset = set()
+    class_names = {}  # To keep track of class names and their modules
+
+    def _add_line(line: str, no_check: bool = False):
+        if no_check:
+            export_lines.append(line)
+            return
+        if line not in lineset:
+            lineset.add(line)
+            export_lines.append(line)
+
+    # Add comments to ignore auto-formatting
+    _add_line("# fmt: off", no_check=True)
+    _add_line("# ruff: noqa", no_check=True)
+    _add_line("# type: ignore", no_check=True)
+    _add_line("", no_check=True)
+
+    # Add codegen marker
+    _add_line(f"{CODEGEN_MARKER}", no_check=True)
+    _add_line("", no_check=True)
+
+    submodule_exports = set()
+
+    # Add Config classes and collect submodules
+    _add_line("# Config classes", no_check=True)
+    for module, config_classes in config_cls_dict.items():
+        if module.startswith(module_name):
+            for cls in config_classes:
+                class_name = cls.__name__
+                if class_name in class_names:
+                    # If we've seen this class name before, use the shorter module path
+                    if len(module) < len(class_names[class_name]):
+                        class_names[class_name] = module
+                else:
+                    class_names[class_name] = module
+
+            # Collect submodule for export
+            if module != module_name:
+                submodule = module[len(module_name) + 1 :].split(".")[0]
+                submodule_exports.add(submodule)
+
+    # Add the unique class imports
+    for class_name, module in class_names.items():
+        _add_line(f"from {module} import {class_name} as {class_name}")
+    _add_line("", no_check=True)
+
+    # Add type aliases
+    _add_line("# Type aliases", no_check=True)
+    alias_names = {}  # To keep track of alias names and their modules
+    for module, aliases in alias_dict.items():
+        if module.startswith(module_name):
+            for name, obj in aliases.items():
+                if name in alias_names:
+                    # If we've seen this alias name before, use the shorter module path
+                    if len(module) < len(alias_names[name]):
+                        alias_names[name] = module
+                else:
+                    alias_names[name] = module
+
+            # Collect submodule for export
+            if module != module_name:
+                submodule = module[len(module_name) + 1 :].split(".")[0]
+                submodule_exports.add(submodule)
+
+    # Add the unique alias imports
+    for alias_name, module in alias_names.items():
+        _add_line(f"from {module} import {alias_name} as {alias_name}")
+    _add_line("", no_check=True)
+
+    # Add submodule exports
+    _add_line("# Submodule exports", no_check=True)
+    for submodule in sorted(submodule_exports):
+        _add_line(f"from . import {submodule} as {submodule}")
+
+    # Write export lines
+    with file_path.open("w") as f:
+        for line in export_lines:
+            f.write(line + "\n")
 
 
 if __name__ == "__main__":
