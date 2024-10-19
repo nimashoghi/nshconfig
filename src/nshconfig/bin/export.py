@@ -54,6 +54,11 @@ def main():
         default=[],
         type=str,
     )
+    parser.add_argument(
+        "--ignore-abc",
+        action="store_true",
+        help="Ignore Abstract Base Classes",
+    )
     args = parser.parse_args()
 
     # Set up logging
@@ -73,7 +78,7 @@ def main():
             continue
 
         logging.debug(f"Exporting configurations from {module_name}")
-        for config_cls in _module_configs(module_name):
+        for config_cls in _module_configs(module_name, args.ignore_abc):
             logging.debug(f"Exporting {config_cls}")
             config_cls_dict[module_name].add(config_cls)
 
@@ -149,7 +154,7 @@ def _find_modules(module_name: str, recursive: bool, ignore_modules: list[str]):
     return modules
 
 
-def _module_configs(module_name: str):
+def _module_configs(module_name: str, ignore_abc: bool):
     # Import the module
     module = importlib.import_module(module_name)
 
@@ -158,6 +163,8 @@ def _module_configs(module_name: str):
         try:
             # Export subclasses of Config
             if issubclass(cls, Config):
+                if ignore_abc and inspect.isabstract(cls):
+                    continue
                 yield cls
 
         except TypeError:
