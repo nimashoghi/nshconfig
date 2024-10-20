@@ -262,57 +262,46 @@ def _create_export_file(
     ignore_autoformat: bool = False,
 ):
     export_lines = []
-    lineset = set()
     class_names = {}  # To keep track of class names and their modules
     alias_names = {}  # To keep track of alias names and their modules
+    submodule_exports = set()
 
-    def _add_line(line: str, no_check: bool = False):
-        if no_check:
-            export_lines.append(line)
-            return
-        if line not in lineset:
-            lineset.add(line)
-            export_lines.append(line)
+    def _add_line(line: str):
+        export_lines.append(line)
 
     # Add comments to ignore auto-formatting
     if ignore_autoformat:
-        _add_line("# fmt: off", no_check=True)
-        _add_line("# ruff: noqa", no_check=True)
-        _add_line("# type: ignore", no_check=True)
-        _add_line("", no_check=True)
+        _add_line("# fmt: off")
+        _add_line("# ruff: noqa")
+        _add_line("# type: ignore")
+        _add_line("")
 
     # Add codegen marker
-    _add_line(f"{CODEGEN_MARKER}", no_check=True)
-    _add_line("", no_check=True)
+    _add_line(f"{CODEGEN_MARKER}")
+    _add_line("")
 
     # Add imports
-    _add_line("from typing import TYPE_CHECKING", no_check=True)
-    _add_line("", no_check=True)
+    _add_line("from typing import TYPE_CHECKING")
+    _add_line("")
 
-    submodule_exports = set()
-
-    # Collect Config classes and aliases
-    for module, config_classes in config_cls_dict.items():
+    # Collect Config classes, aliases, and submodules
+    for module, config_classes in sorted(config_cls_dict.items()):
         if module.startswith(module_name):
-            for cls in config_classes:
+            for cls in sorted(config_classes, key=lambda c: c.__name__):
                 class_name = cls.__name__
-                if class_name in class_names:
-                    if len(module) < len(class_names[class_name]):
-                        class_names[class_name] = module
-                else:
+                if class_name not in class_names or len(module) < len(
+                    class_names[class_name]
+                ):
                     class_names[class_name] = module
 
             if module != module_name:
                 submodule = module[len(module_name) + 1 :].split(".")[0]
                 submodule_exports.add(submodule)
 
-    for module, aliases in alias_dict.items():
+    for module, aliases in sorted(alias_dict.items()):
         if module.startswith(module_name):
-            for name, obj in aliases.items():
-                if name in alias_names:
-                    if len(module) < len(alias_names[name]):
-                        alias_names[name] = module
-                else:
+            for name in sorted(aliases.keys()):
+                if name not in alias_names or len(module) < len(alias_names[name]):
                     alias_names[name] = module
 
             if module != module_name:
@@ -320,45 +309,42 @@ def _create_export_file(
                 submodule_exports.add(submodule)
 
     # Config/alias imports
-    _add_line("# Config/alias imports", no_check=True)
-    _add_line("", no_check=True)
+    _add_line("# Config/alias imports")
+    _add_line("")
 
     # Add type checking imports
-    _add_line("if TYPE_CHECKING:", no_check=True)
-    for class_name, module in class_names.items():
+    _add_line("if TYPE_CHECKING:")
+    for class_name, module in sorted(class_names.items()):
         _add_line(f"    from {module} import {class_name} as {class_name}")
-    for alias_name, module in alias_names.items():
+    for alias_name, module in sorted(alias_names.items()):
         _add_line(f"    from {module} import {alias_name} as {alias_name}")
-    _add_line("else:", no_check=True)
+    _add_line("else:")
 
     # Add dynamic import function
-    _add_line("    def __getattr__(name):", no_check=True)
-    _add_line("        import importlib", no_check=True)
-    _add_line("        if name in globals():", no_check=True)
-    _add_line("            return globals()[name]", no_check=True)
+    _add_line("    def __getattr__(name):")
+    _add_line("        import importlib")
+    _add_line("        if name in globals():")
+    _add_line("            return globals()[name]")
 
-    for class_name, module in class_names.items():
-        _add_line(f"        if name == '{class_name}':", no_check=True)
+    for class_name, module in sorted(class_names.items()):
+        _add_line(f"        if name == '{class_name}':")
         _add_line(
-            f"            return importlib.import_module('{module}').{class_name}",
-            no_check=True,
+            f"            return importlib.import_module('{module}').{class_name}"
         )
 
-    for alias_name, module in alias_names.items():
-        _add_line(f"        if name == '{alias_name}':", no_check=True)
+    for alias_name, module in sorted(alias_names.items()):
+        _add_line(f"        if name == '{alias_name}':")
         _add_line(
-            f"            return importlib.import_module('{module}').{alias_name}",
-            no_check=True,
+            f"            return importlib.import_module('{module}').{alias_name}"
         )
 
     _add_line(
-        "        raise AttributeError(f\"module '{__name__}' has no attribute '{name}'\")",
-        no_check=True,
+        "        raise AttributeError(f\"module '{__name__}' has no attribute '{name}'\")"
     )
 
     # Add submodule exports
-    _add_line("", no_check=True)
-    _add_line("# Submodule exports", no_check=True)
+    _add_line("")
+    _add_line("# Submodule exports")
     for submodule in sorted(submodule_exports):
         _add_line(f"from . import {submodule} as {submodule}")
 
