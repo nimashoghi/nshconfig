@@ -221,15 +221,28 @@ def _create_export_files(
     )
 
     # Create hierarchical export files
-    for module_name in config_cls_dict.keys():
+    all_modules = set(config_cls_dict.keys()) | set(alias_dict.keys())
+    for module_name in all_modules:
         if module_name == base_module:
             continue
-        relative_path = module_name[len(base_module) + 1 :].replace(".", "/")
-        module_dir = output_dir / relative_path
-        module_dir.mkdir(parents=True, exist_ok=True)
-        _create_export_file(
-            module_dir / "__init__.py", module_name, config_cls_dict, alias_dict
-        )
+
+        relative_path = module_name[len(base_module) + 1 :].split(".")
+        current_path = output_dir
+        current_module = base_module
+
+        for part in relative_path:
+            current_path = current_path / part
+            current_path.mkdir(exist_ok=True)
+            current_module = f"{current_module}.{part}"
+
+            init_file = current_path / "__init__.py"
+            if not init_file.exists():
+                _create_export_file(
+                    init_file,
+                    current_module,
+                    config_cls_dict,
+                    alias_dict,
+                )
 
     # Format files using ruff if available
     try:
