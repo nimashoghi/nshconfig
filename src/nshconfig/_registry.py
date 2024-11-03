@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import logging
 import typing
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Generic, cast
 
 from pydantic import GetCoreSchemaHandler
-from pydantic_core import CoreSchema, core_schema
+from pydantic_core import core_schema
 from typing_extensions import TypeVar
 
 import nshconfig as C
+
+log = logging.getLogger(__name__)
 
 TConfig = TypeVar("TConfig", bound=C.Config, infer_variance=True)
 TClass = TypeVar("TClass", bound=type[C.Config])
@@ -168,6 +171,7 @@ class Registry(Generic[TConfig]):
 
         # Add the cls to the registry
         self._elements.append(_RegistryEntry(tag=tag, cls=cls))
+        log.info(f"Registered {cls} with tag '{tag}'.")
 
         # Call the on_register callbacks
         for callback in self._on_register_callbacks:
@@ -288,15 +292,13 @@ class Registry(Generic[TConfig]):
             )
 
         # Construct the choices for the union schema
-        choices: list[core_schema.CoreSchema | tuple[CoreSchema, str]] = []
+        choices: dict[str, core_schema.CoreSchema] = {}
         for e in self._elements:
             cls = cast(type[C.Config], e.cls)
-            choices.append(
-                core_schema.model_schema(cls, schema=cls.__pydantic_core_schema__)
-            )
-        return core_schema.union_schema(
+            choices[e.tag] = cls.__pydantic_core_schema__
+        return core_schema.tagged_union_schema(
             choices,
-            auto_collapse=False,
+            discriminator=self.discriminator_field,
         )
 
     def type_adapter(self):
@@ -428,7 +430,7 @@ class Registry(Generic[TConfig]):
                 handler: GetCoreSchemaHandler,
             ) -> core_schema.CoreSchema:
                 nonlocal registry
-                return core_schema.with_default_schema(registry.pydantic_schema())
+                return registry.pydantic_schema()
 
         return _RegistryTypeAnnotation
 
