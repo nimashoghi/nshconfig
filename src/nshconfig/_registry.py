@@ -1,24 +1,24 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 import typing
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from typing import Any, Generic, cast
 
 from pydantic import GetCoreSchemaHandler
 from pydantic_core import core_schema
 from typing_extensions import TypeVar
 
-import nshconfig as C
+from ._config import Config
 
 log = logging.getLogger(__name__)
 
-TConfig = TypeVar("TConfig", bound=C.Config, infer_variance=True)
-TClass = TypeVar("TClass", bound=type[C.Config])
+TConfig = TypeVar("TConfig", bound=Config, infer_variance=True)
+TClass = TypeVar("TClass", bound=type[Config])
 
 
-def _resolve_tag(cls: type[C.Config], discriminator_field_name: str) -> str:
+def _resolve_tag(cls: type[Config], discriminator_field_name: str) -> str:
     # Make sure cls has the discriminator attribute
     if (discriminator_field := cls.model_fields.get(discriminator_field_name)) is None:
         raise ValueError(f"{cls} does not have a field `{discriminator_field_name}`")
@@ -47,7 +47,7 @@ def _resolve_tag(cls: type[C.Config], discriminator_field_name: str) -> str:
     return typing.get_args(type_)[0]
 
 
-@dataclass
+@dataclasses.dataclass
 class Registry(Generic[TConfig]):
     """A registry system for creating dynamic discriminated unions with Pydantic models.
 
@@ -63,7 +63,7 @@ class Registry(Generic[TConfig]):
 
     Example:
         ```python
-        class AnimalBaseConfig(C.Config, ABC):
+        class AnimalBaseConfig(Config, ABC):
             type: str
 
             @abstractmethod
@@ -91,7 +91,7 @@ class Registry(Generic[TConfig]):
         ```
 
         @registry.rebuild_on_registers
-        class ProgramConfig(C.Config):
+        class ProgramConfig(Config):
             animal: Annotated[AnimalBaseConfig, registry.DynamicResolution()]
 
         # ^ With the above code, the `ProgramConfig` class will have a field `animal`
@@ -123,9 +123,10 @@ class Registry(Generic[TConfig]):
     """
 
     base_cls: type[TConfig]
-    discriminator_field: str
-    _elements: list[_RegistryEntry] = field(default_factory=lambda: [])
-    _on_register_callbacks: list[Callable[[type[C.Config]], None]] = field(
+    _: dataclasses.KW_ONLY
+    discriminator: str
+    _elements: list[_RegistryEntry] = dataclasses.field(default_factory=lambda: [])
+    _on_register_callbacks: list[Callable[[type[Config]], None]] = dataclasses.field(
         default_factory=lambda: []
     )
 
@@ -157,7 +158,7 @@ class Registry(Generic[TConfig]):
             raise ValueError(f"{cls} is already registered.")
 
         # Extract the tag from the cls
-        tag = _resolve_tag(cls, self.discriminator_field)
+        tag = _resolve_tag(cls, self.discriminator)
 
         # Check if the tag is already registered
         if (
@@ -191,7 +192,7 @@ class Registry(Generic[TConfig]):
         for the second print (since `MooseConfig` is registered after the schema is built):
 
         ```python
-        class AnimalBaseConfig(C.Config, ABC): ...
+        class AnimalBaseConfig(Config, ABC): ...
 
         registry = Registry(AnimalBaseConfig, "type")
 
@@ -201,7 +202,7 @@ class Registry(Generic[TConfig]):
         @registry.register
         class CatConfig(AnimalBaseConfig): ...
 
-        class ProgramConfig(C.Config):
+        class ProgramConfig(Config):
             animal: Annotated[AnimalBaseConfig, registry.DynamicResolution()]
 
         # This will work, since `DogConfig` is registered before the schema is built.
@@ -230,7 +231,7 @@ class Registry(Generic[TConfig]):
         example, the code below will work as expected:
 
         ```python
-        class AnimalBaseConfig(C.Config, ABC): ...
+        class AnimalBaseConfig(Config, ABC): ...
 
         registry = Registry(AnimalBaseConfig, "type")
 
@@ -241,7 +242,7 @@ class Registry(Generic[TConfig]):
         class CatConfig(AnimalBaseConfig): ...
 
         @registry.rebuild_on_registers
-        class ProgramConfig(C.Config):
+        class ProgramConfig(Config):
             animal: Annotated[AnimalBaseConfig, registry.DynamicResolution()]
 
         # This will work, since `DogConfig` is registered before the schema is built.
@@ -267,7 +268,7 @@ class Registry(Generic[TConfig]):
             The decorated class
         """
 
-        def _rebuild(_: type[C.Config]):
+        def _rebuild(_: type[Config]):
             cls.model_rebuild(force=True, raise_errors=False)
 
         self._on_register_callbacks.append(_rebuild)
@@ -294,11 +295,11 @@ class Registry(Generic[TConfig]):
         # Construct the choices for the union schema
         choices: dict[str, core_schema.CoreSchema] = {}
         for e in self._elements:
-            cls = cast(type[C.Config], e.cls)
+            cls = cast(type[Config], e.cls)
             choices[e.tag] = cls.__pydantic_core_schema__
         return core_schema.tagged_union_schema(
             choices,
-            discriminator=self.discriminator_field,
+            discriminator=self.discriminator,
         )
 
     def type_adapter(self):
@@ -307,13 +308,14 @@ class Registry(Generic[TConfig]):
         Returns:
             A TypeAdapter for validating/serializing registry types
         """
+        from pydantic import Field, TypeAdapter
 
         # Construct the annotated union type.
         t = typing.Union[tuple(e.cls for e in self._elements)]  # type: ignore
-        t = typing.Annotated[t, C.Field(discriminator=self.discriminator_field)]
+        t = typing.Annotated[t, Field(discriminator=self.discriminator)]
 
         # Create the TypeAdapter class for this type
-        return C.TypeAdapter[TConfig](t)
+        return TypeAdapter[TConfig](t)
 
     def construct(self, config: Any) -> TConfig:
         """Construct a registered type instance from configuration data.
@@ -355,7 +357,7 @@ class Registry(Generic[TConfig]):
             Basic usage with a single field:
             ```python
             @registry.rebuild_on_registers
-            class Config(C.Config):
+            class Config(Config):
                 # This field will accept any type registered with 'registry'
                 animal: Annotated[AnimalBase, registry.DynamicResolution()]
 
@@ -390,7 +392,7 @@ class Registry(Generic[TConfig]):
         fully dynamic models that can handle new types as they are registered:
         ```python
         # In your base package:
-        class AnimalBase(C.Config, ABC):
+        class AnimalBase(Config, ABC):
             type: str
             @abstractmethod
             def make_sound(self) -> str: ...
@@ -404,7 +406,7 @@ class Registry(Generic[TConfig]):
             def make_sound(self) -> str: return "Woof!"
 
         @registry.rebuild_on_registers
-        class ProgramConfig(C.Config):
+        class ProgramConfig(Config):
             animal: Annotated[AnimalBase, registry.DynamicResolution()]
 
         # In a separate plugin package:
@@ -435,10 +437,10 @@ class Registry(Generic[TConfig]):
         return _RegistryTypeAnnotation
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class _RegistryEntry:
     tag: str
-    cls: type[C.Config]
+    cls: type[Config]
 
 
 def _unwrap_annotated_recurive(typ: Any):
