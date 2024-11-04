@@ -103,18 +103,19 @@ from typing import Literal, Annotated
 
 # Define your base configuration
 class AnimalConfig(C.Config, ABC):
-    type: str  # This will be our discriminator field
-
     @abstractmethod
     def make_sound(self) -> str: ...
 
 # Create a registry for animal types
-animal_registry = C.Registry(AnimalConfig, discriminator="type")
+animal_registry = C.Registry(
+    AnimalConfig,
+    discriminator="type"  # Discriminator field to determine the type of the config
+)
 
 # Register some implementations
 @animal_registry.register
 class DogConfig(AnimalConfig):
-    type: Literal["dog"]
+    type: Literal["dog"] = "dog"
     name: str
 
     def make_sound(self) -> str:
@@ -122,7 +123,7 @@ class DogConfig(AnimalConfig):
 
 @animal_registry.register
 class CatConfig(AnimalConfig):
-    type: Literal["cat"]
+    type: Literal["cat"] = "cat"
     name: str
 
     def make_sound(self) -> str:
@@ -134,8 +135,11 @@ class ProgramConfig(C.Config):
     animal: Annotated[AnimalConfig, animal_registry.DynamicResolution()]
 
 # Use it!
-config = ProgramConfig(animal=DogConfig(type="dog", name="Rover"))
-print(config.animal.make_sound())  # "Woof!"
+def main(program_config: ProgramConfig):
+    print(program_config.animal.make_sound())
+
+main(ProgramConfig(animal=DogConfig(name="Buddy")))  # Output: Woof!
+main(ProgramConfig(animal=CatConfig(name="Whiskers")))  # Output: Meow!
 ```
 
 #### Plugin System Support
@@ -146,7 +150,7 @@ The real power of the Registry system comes when building extensible application
 # In a separate plugin package:
 @animal_registry.register
 class BirdConfig(AnimalConfig):
-    type: Literal["bird"]
+    type: Literal["bird"] = "bird"
     name: str
     wingspan: float
 
@@ -154,7 +158,7 @@ class BirdConfig(AnimalConfig):
         return "Tweet!"
 
 # This works automatically, even though BirdConfig was registered after ProgramConfig was defined
-config = ProgramConfig(animal=BirdConfig(type="bird", name="Tweety", wingspan=0.3))
+main(ProgramConfig(animal=BirdConfig(name="Tweety", wingspan=1.2)))  # Output: Tweet!
 ```
 
 #### Key Features
