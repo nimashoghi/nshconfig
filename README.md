@@ -109,7 +109,7 @@ class AnimalConfig(C.Config, ABC):
     def make_sound(self) -> str: ...
 
 # Create a registry for animal types
-animal_registry = C.Registry(AnimalConfig, "type")
+animal_registry = C.Registry(AnimalConfig, discriminator="type")
 
 # Register some implementations
 @animal_registry.register
