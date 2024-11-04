@@ -9,3 +9,4 @@ from ._missing import MISSING as MISSING
 from ._missing import AllowMissing as AllowMissing
 from ._missing import MissingField as MissingField
 from ._registry import Registry as Registry
+from ._registry import RegistryConfig as RegistryConfig

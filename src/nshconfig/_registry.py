@@ -4,17 +4,17 @@ import dataclasses
 import logging
 import typing
 from collections.abc import Callable
-from typing import Any, Generic, cast
+from typing import Any, Generic, Literal, TypedDict, TypeVar, cast
 
 from pydantic import GetCoreSchemaHandler
 from pydantic_core import core_schema
-from typing_extensions import TypeVar
+from typing_extensions import assert_never
 
 from ._config import Config
 
 log = logging.getLogger(__name__)
 
-TConfig = TypeVar("TConfig", bound=Config, infer_variance=True)
+TConfig = TypeVar("TConfig", bound=Config, covariant=True)
 TClass = TypeVar("TClass", bound=type[Config])
 
 
@@ -45,6 +45,20 @@ def _resolve_tag(cls: type[Config], discriminator_field_name: str) -> str:
 
     # Extract the tag
     return typing.get_args(type_)[0]
+
+
+class RegistryConfig(TypedDict, total=False):
+    """A typed dictionary defining configuration options for the registry.
+
+    Attributes:
+        duplicate_tag_policy (Literal["warn-and-ignore", "warn-and-replace", "error"]):
+            Defines how to handle duplicate tags in the registry.
+            - "warn-and-ignore": Warns about duplicates but keeps the original tag
+            - "warn-and-replace": Warns about duplicates and replaces with new tag
+            - "error": Raises an error when duplicate tags are found
+    """
+
+    duplicate_tag_policy: Literal["warn-and-ignore", "warn-and-replace", "error"]
 
 
 @dataclasses.dataclass
@@ -125,6 +139,9 @@ class Registry(Generic[TConfig]):
     base_cls: type[TConfig]
     _: dataclasses.KW_ONLY
     discriminator: str
+    config: RegistryConfig = dataclasses.field(
+        default_factory=lambda: {"duplicate_tag_policy": "error"}
+    )
     _elements: list[_RegistryEntry] = dataclasses.field(default_factory=lambda: [])
     _on_register_callbacks: list[Callable[[type[Config]], None]] = dataclasses.field(
         default_factory=lambda: []
@@ -166,9 +183,23 @@ class Registry(Generic[TConfig]):
                 (e.cls for e in self._elements if e.tag == tag), None
             )
         ) is not None and registered_by_tag != cls:
-            raise ValueError(
-                f"Tag `{tag}` is already registered by {registered_by_tag}."
-            )
+            match self.config.get("duplicate_tag_policy", "error"):
+                case "warn-and-ignore":
+                    log.warning(
+                        f"Tag `{tag}` is already registered by {registered_by_tag}. Ignoring {cls}."
+                    )
+                    return cast(TClass, registered_by_tag)
+                case "warn-and-replace":
+                    log.warning(
+                        f"Tag `{tag}` is already registered by {registered_by_tag}. Replacing with {cls}."
+                    )
+                    self._elements = [e for e in self._elements if e.tag != tag]
+                case "error":
+                    raise ValueError(
+                        f"Tag `{tag}` is already registered by {registered_by_tag}."
+                    )
+                case _:
+                    assert_never(policy)
 
         # Add the cls to the registry
         self._elements.append(_RegistryEntry(tag=tag, cls=cls))
