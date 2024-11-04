@@ -131,7 +131,7 @@ class CatConfig(AnimalConfig):
 # Create a config that uses the registry
 @animal_registry.rebuild_on_registers
 class ProgramConfig(C.Config):
-    animal: Annotated[AnimalConfig, animal_registry.RegistryResolution()]
+    animal: Annotated[AnimalConfig, animal_registry.DynamicResolution()]
 
 # Use it!
 config = ProgramConfig(animal=DogConfig(type="dog", name="Rover"))

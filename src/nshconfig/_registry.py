@@ -92,7 +92,7 @@ class Registry(Generic[TConfig]):
 
         @registry.rebuild_on_registers
         class ProgramConfig(C.Config):
-            animal: Annotated[AnimalBaseConfig, registry.RegistryResolution()]
+            animal: Annotated[AnimalBaseConfig, registry.DynamicResolution()]
 
         # ^ With the above code, the `ProgramConfig` class will have a field `animal`
         # that can be any of the registered classes in the registry. Our implementation
@@ -202,7 +202,7 @@ class Registry(Generic[TConfig]):
         class CatConfig(AnimalBaseConfig): ...
 
         class ProgramConfig(C.Config):
-            animal: Annotated[AnimalBaseConfig, registry.RegistryResolution()]
+            animal: Annotated[AnimalBaseConfig, registry.DynamicResolution()]
 
         # This will work, since `DogConfig` is registered before the schema is built.
         print(ProgramConfig(animal=DogConfig(type="dog")))
@@ -242,7 +242,7 @@ class Registry(Generic[TConfig]):
 
         @registry.rebuild_on_registers
         class ProgramConfig(C.Config):
-            animal: Annotated[AnimalBaseConfig, registry.RegistryResolution()]
+            animal: Annotated[AnimalBaseConfig, registry.DynamicResolution()]
 
         # This will work, since `DogConfig` is registered before the schema is built.
         print(ProgramConfig(animal=DogConfig(type="dog")))
@@ -338,7 +338,7 @@ class Registry(Generic[TConfig]):
 
         print(output)
 
-    def RegistryResolution(self):
+    def DynamicResolution(self):
         """Create a type annotation that enables dynamic type resolution using this registry.
 
         This method is a core part of using the registry system with Pydantic models. It creates
@@ -357,7 +357,7 @@ class Registry(Generic[TConfig]):
             @registry.rebuild_on_registers
             class Config(C.Config):
                 # This field will accept any type registered with 'registry'
-                animal: Annotated[AnimalBase, registry.RegistryResolution()]
+                animal: Annotated[AnimalBase, registry.DynamicResolution()]
 
             # These will all work:
             Config(animal=DogConfig(type="dog", name="Rover"))
@@ -377,7 +377,7 @@ class Registry(Generic[TConfig]):
                to automatically support newly registered types.
 
             2. The Annotated type should use the registry's base class as its first argument
-               (e.g., Annotated[AnimalBase, registry.RegistryResolution()])
+               (e.g., Annotated[AnimalBase, registry.DynamicResolution()])
 
             3. This can be used with any Pydantic field type that accepts a model, including
                nested within lists, dicts, Optional[], etc.
@@ -405,7 +405,7 @@ class Registry(Generic[TConfig]):
 
         @registry.rebuild_on_registers
         class ProgramConfig(C.Config):
-            animal: Annotated[AnimalBase, registry.RegistryResolution()]
+            animal: Annotated[AnimalBase, registry.DynamicResolution()]
 
         # In a separate plugin package:
         @registry.register
