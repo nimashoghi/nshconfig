@@ -6,9 +6,13 @@ import importlib.util
 import inspect
 import logging
 import shutil
+import types
+import typing
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
+
+from typing_extensions import TypeAliasType
 
 from nshconfig import Config, Export
 
@@ -61,6 +65,11 @@ def main():
         help="Ignore Abstract Base Classes",
     )
     parser.add_argument(
+        "--export-generics",
+        action=argparse.BooleanOptionalAction,
+        help="Export generic types",
+    )
+    parser.add_argument(
         "--use-dynamic-import",
         action=argparse.BooleanOptionalAction,
         help="Use dynamic import instead of static import",
@@ -84,11 +93,19 @@ def main():
             continue
 
         logging.debug(f"Exporting configurations from {module_name}")
-        for config_cls in _module_configs(module_name, args.ignore_abc):
+        for config_cls in _module_configs(
+            module_name,
+            args.ignore_abc,
+            args.export_generics,
+        ):
             logging.debug(f"Exporting {config_cls}")
             config_cls_dict[module_name].add(config_cls)
 
-        for name, obj in _alias_configs(module_name):
+        for name, obj in _alias_configs(
+            module_name,
+            args.ignore_abc,
+            args.export_generics,
+        ):
             alias_dict[module_name][name] = obj
 
     # Just remove the output directory if remove_existing is True
@@ -166,55 +183,111 @@ def _find_modules(module_name: str, recursive: bool, ignore_modules: list[str]):
     return modules
 
 
-def _module_configs(module_name: str, ignore_abc: bool):
+def _unwrap_type_alias(obj: typing.Any):
+    # If this is a `TypeAliasType`, resolve the actual type.
+    if isinstance(obj, TypeAliasType):
+        obj = obj.__value__
+
+    return obj
+
+
+def _should_export(obj: typing.Any, ignore_abc: bool, export_generics: bool):
+    # If this is a `TypeAliasType`, resolve the actual type.
+    obj = _unwrap_type_alias(obj)
+
+    # First check for Export() metadata in the Annotated[] metadata
+    def _has_export_metadata(obj: typing.Any):
+        try:
+            if (
+                metadata := getattr(obj, "__metadata__", None)
+            ) is None or not isinstance(metadata, Iterable):
+                return False
+
+            for m in metadata:
+                if isinstance(m, Export):
+                    return True
+        except TypeError:
+            return False
+
+    if _has_export_metadata(obj):
+        return True
+
+    # Otherwise, resolve the types. If the type is an nshconfig.Config or
+    #   a union of nshconfig.Config types, export it.
+    def _is_config_type(
+        obj: typing.Any,
+        ignore_abc: bool,
+        export_generics: bool,
+    ):
+        try:
+            # If this is a `TypeAliasType`, resolve the actual type.
+            obj = _unwrap_type_alias(obj)
+
+            # If this is a Config subclass, export it
+            if (
+                inspect.isclass(obj)
+                and issubclass(obj, Config)
+                and (not ignore_abc or not inspect.isabstract(obj))
+            ):
+                return True
+
+            # If this an Annotated type, we need to check the inner type.
+            if typing.get_origin(obj) is typing.Annotated:
+                return _is_config_type(
+                    typing.get_args(obj)[0], ignore_abc, export_generics
+                )
+
+            # If this is a Union of Config types, recursively check each type, and
+            #   if all types are Config types, export it.
+            if typing.get_origin(obj) in (types.UnionType, typing.Union):
+                return all(
+                    _is_config_type(t, ignore_abc, export_generics)
+                    for t in typing.get_args(obj)
+                )
+
+            # If this is a generic type, we have two cases:
+            #  - TypeVar("T", bound=ConfigOrConfigSubclass): export it
+            #  - TypeVar("T", ConfigOrConfigSubclass1, [ConfigOrConfigSubclass2, ...]): export it
+            if export_generics and isinstance(obj, typing.TypeVar):
+                if obj.__bound__ is not None:
+                    return _is_config_type(obj.__bound__, ignore_abc, export_generics)
+                if obj.__constraints__:
+                    return all(
+                        _is_config_type(c, ignore_abc, export_generics)
+                        for c in obj.__constraints__
+                    )
+
+            # Otherwise, we don't export it.
+            return False
+
+        except TypeError:
+            return False
+
+    if _is_config_type(obj, ignore_abc, export_generics):
+        return True
+
+    return False
+
+
+def _module_configs(module_name: str, ignore_abc: bool, export_generics: bool):
     # Import the module
     module = importlib.import_module(module_name)
 
     # Find all subclasses of Config
     for _, cls in inspect.getmembers(module, inspect.isclass):
-        try:
-            # Export subclasses of Config
-            if issubclass(cls, Config):
-                if ignore_abc and inspect.isabstract(cls):
-                    continue
-                yield cls
-
-        except TypeError:
-            continue
+        if _should_export(cls, ignore_abc, export_generics):
+            yield cls
 
 
-def _is_export(metadata: Iterable):
-    for m in metadata:
-        # First check for Export() metadata.
-        if isinstance(m, Export):
-            return True
-
-        # Then, we check for any Pydantic metadata.
-        try:
-            modulebase = m.__module__.split(".", 1)[0]
-            if modulebase == "pydantic":
-                return True
-        except Exception:
-            continue
-
-
-def _alias_configs(module_name: str):
+def _alias_configs(module_name: str, ignore_abc: bool, export_generics: bool):
     # Import the module
     module = importlib.import_module(module_name)
 
     # Also export type aliases that have the Export()
     # in their Annotated[] metadata.
     for name, obj in inspect.getmembers(module):
-        try:
-            if (
-                (metadata := getattr(obj, "__metadata__", None))
-                and isinstance(metadata, Iterable)
-                and _is_export(metadata)
-            ):
-                yield name, obj
-
-        except TypeError:
-            continue
+        if _should_export(obj, ignore_abc, export_generics):
+            yield name, obj
 
 
 def _create_export_files(
