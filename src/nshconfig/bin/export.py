@@ -57,8 +57,13 @@ def main():
     )
     parser.add_argument(
         "--ignore-abc",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="Ignore Abstract Base Classes",
+    )
+    parser.add_argument(
+        "--use-dynamic-import",
+        action=argparse.BooleanOptionalAction,
+        help="Use dynamic import instead of static import",
     )
     args = parser.parse_args()
 
@@ -94,7 +99,13 @@ def main():
             args.output.unlink()
 
     # Create export files
-    _create_export_files(args.output, args.module, config_cls_dict, alias_dict)
+    _create_export_files(
+        args.output,
+        args.module,
+        config_cls_dict,
+        alias_dict,
+        args.use_dynamic_import,
+    )
 
 
 def _is_generated_module(module_name: str) -> bool:
@@ -207,12 +218,23 @@ def _alias_configs(module_name: str):
 
 
 def _create_export_files(
-    output_dir: Path, base_module: str, config_cls_dict: dict, alias_dict: dict
+    output_dir: Path,
+    base_module: str,
+    config_cls_dict: dict,
+    alias_dict: dict,
+    use_dynamic_import: bool,
 ):
+    # Choose the appropriate export file creation function
+    create_export_file_fn = (
+        _create_export_file_dynamic_import
+        if use_dynamic_import
+        else _create_export_file_static_import
+    )
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Create the root export file
-    _create_export_file(
+    create_export_file_fn(
         output_dir / "__init__.py",
         base_module,
         config_cls_dict,
@@ -236,7 +258,7 @@ def _create_export_files(
 
             init_file = current_path / "__init__.py"
             if not init_file.exists():
-                _create_export_file(
+                create_export_file_fn(
                     init_file,
                     current_module,
                     config_cls_dict,
@@ -266,7 +288,7 @@ def _create_export_files(
         pass
 
 
-def _create_export_file(
+def _create_export_file_dynamic_import(
     file_path: Path,
     module_name: str,
     config_cls_dict: dict,
@@ -357,6 +379,79 @@ def _create_export_file(
     # Add submodule exports
     _add_line("")
     _add_line("# Submodule exports")
+    for submodule in sorted(submodule_exports):
+        _add_line(f"from . import {submodule} as {submodule}")
+
+    # Write export lines
+    with file_path.open("w") as f:
+        for line in export_lines:
+            f.write(line + "\n")
+
+
+def _create_export_file_static_import(
+    file_path: Path,
+    module_name: str,
+    config_cls_dict: dict,
+    alias_dict: dict,
+    ignore_autoformat: bool = False,
+):
+    export_lines = []
+    class_names = {}  # To keep track of class names and their modules
+    alias_names = {}  # To keep track of alias names and their modules
+    submodule_exports = set()
+
+    def _add_line(line: str):
+        export_lines.append(line)
+
+    # Add comments to ignore auto-formatting
+    if ignore_autoformat:
+        _add_line("# fmt: off")
+        _add_line("# ruff: noqa")
+        _add_line("# type: ignore")
+        _add_line("")
+
+    # Add codegen marker
+    _add_line(f"{CODEGEN_MARKER}")
+    _add_line("")
+
+    # Collect Config classes, aliases, and submodules
+    for module, config_classes in sorted(config_cls_dict.items()):
+        if module.startswith(module_name):
+            for cls in sorted(config_classes, key=lambda c: c.__name__):
+                class_name = cls.__name__
+                if class_name not in class_names or len(module) < len(
+                    class_names[class_name]
+                ):
+                    class_names[class_name] = module
+
+            if module != module_name:
+                submodule = module[len(module_name) + 1 :].split(".")[0]
+                submodule_exports.add(submodule)
+
+    for module, aliases in sorted(alias_dict.items()):
+        if module.startswith(module_name):
+            for name in sorted(aliases.keys()):
+                if name not in alias_names or len(module) < len(alias_names[name]):
+                    alias_names[name] = module
+
+            if module != module_name:
+                submodule = module[len(module_name) + 1 :].split(".")[0]
+                submodule_exports.add(submodule)
+
+    # Direct imports of configs and aliases
+    for class_name, module in sorted(class_names.items()):
+        _add_line(f"from {module} import {class_name} as {class_name}")
+
+    if class_names:
+        _add_line("")
+
+    for alias_name, module in sorted(alias_names.items()):
+        _add_line(f"from {module} import {alias_name} as {alias_name}")
+
+    if alias_names:
+        _add_line("")
+
+    # Add submodule exports
     for submodule in sorted(submodule_exports):
         _add_line(f"from . import {submodule} as {submodule}")
 
