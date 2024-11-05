@@ -10,7 +10,7 @@ from pydantic import GetCoreSchemaHandler
 from pydantic_core import core_schema
 from typing_extensions import assert_never
 
-from ._config import Config
+from .config import Config
 
 log = logging.getLogger(__name__)
 

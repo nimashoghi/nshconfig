@@ -10,8 +10,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 
-from nshconfig import Config
-from nshconfig._export import Export
+from nshconfig import Config, Export
 
 CODEGEN_MARKER = "__codegen__ = True"
 

@@ -12,8 +12,8 @@ from pydantic import BaseModel, PrivateAttr
 from pydantic import ConfigDict as _ConfigDict
 from typing_extensions import Unpack, override
 
-from ._missing import MISSING as _MISSING
-from ._missing import validate_no_missing_values
+from .missing import MISSING as _MISSING
+from .missing import validate_no_missing_values
 
 _MutableMappingBase = MutableMapping[str, Any]
 if TYPE_CHECKING:
@@ -340,7 +340,7 @@ class Config(BaseModel, _MutableMappingBase):
         if importlib.util.find_spec("treescope") is None:
             raise ImportError("The `treescope` package is required for this feature.")
 
-        from ._treescope_util import render_object_constructor
+        from .treescope_util import render_object_constructor
 
         # For the attributes, let's first output the fields that are different from the default.
         attributes = {}
