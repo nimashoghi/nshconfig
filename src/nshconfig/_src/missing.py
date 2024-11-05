@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, Field
 from pydantic.config import JsonDict
 from pydantic.fields import AliasChoices, AliasPath, FieldInfo, _EmptyKwargs, _Unset
 from pydantic.types import Discriminator
 from pydantic_core import PydanticCustomError, PydanticUndefined
-from typing_extensions import TypeVar, Unpack
+from typing_extensions import TypeAliasType, TypeVar, Unpack
 
 
 @dataclass
@@ -21,9 +21,17 @@ MISSING = cast(Any, None)
 
 T = TypeVar("T", infer_variance=True)
 if TYPE_CHECKING:
-    AllowMissing: TypeAlias = Annotated[T, AllowMissingAnnotation()]
+    AllowMissing = TypeAliasType(
+        "AllowMissing",
+        Annotated[T, AllowMissingAnnotation()],
+        type_params=(T,),
+    )
 else:
-    AllowMissing: TypeAlias = Annotated[T | None, AllowMissingAnnotation()]
+    AllowMissing = TypeAliasType(
+        "AllowMissing",
+        Annotated[T | None, AllowMissingAnnotation()],
+        type_params=(T,),
+    )
 
 
 def validate_no_missing_values(model: BaseModel):
