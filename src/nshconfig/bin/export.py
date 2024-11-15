@@ -393,7 +393,7 @@ def _create_export_file_dynamic_import(
 
     # Collect Config classes, aliases, and submodules
     for module, config_classes in sorted(config_cls_dict.items()):
-        if module.startswith(module_name):
+        if module == module_name or module.startswith(f"{module_name}."):
             for cls in sorted(config_classes, key=lambda c: c.__name__):
                 class_name = cls.__name__
                 if class_name not in class_names or len(module) < len(
@@ -406,7 +406,7 @@ def _create_export_file_dynamic_import(
                 submodule_exports.add(submodule)
 
     for module, aliases in sorted(alias_dict.items()):
-        if module.startswith(module_name):
+        if module == module_name or module.startswith(f"{module_name}."):
             for name in sorted(aliases.keys()):
                 if name not in alias_names or len(module) < len(alias_names[name]):
                     alias_names[name] = module
@@ -489,7 +489,7 @@ def _create_export_file_static_import(
 
     # Collect Config classes, aliases, and submodules
     for module, config_classes in sorted(config_cls_dict.items()):
-        if module.startswith(module_name):
+        if module == module_name or module.startswith(f"{module_name}."):
             for cls in sorted(config_classes, key=lambda c: c.__name__):
                 class_name = cls.__name__
                 if class_name not in class_names or len(module) < len(
@@ -502,7 +502,7 @@ def _create_export_file_static_import(
                 submodule_exports.add(submodule)
 
     for module, aliases in sorted(alias_dict.items()):
-        if module.startswith(module_name):
+        if module == module_name or module.startswith(f"{module_name}."):
             for name in sorted(aliases.keys()):
                 if name not in alias_names or len(module) < len(alias_names[name]):
                     alias_names[name] = module
