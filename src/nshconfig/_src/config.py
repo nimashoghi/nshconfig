@@ -38,6 +38,13 @@ class ConfigDict(_ConfigDict, total=False):
 
 
 class Config(BaseModel, _MutableMappingBase):
+    """
+    A base configuration class that provides validation and serialization capabilities.
+
+    This class extends Pydantic's BaseModel and implements a mutable mapping interface. It supports draft configurations
+    for flexible initialization and provides various serialization methods.
+    """
+
     _is_draft_config: bool = PrivateAttr(default=False)
     """
     Whether this config is a draft config or not.
@@ -357,5 +364,153 @@ class Config(BaseModel, _MutableMappingBase):
             subtree_renderer=subtree_renderer,
             roundtrippable=True,
         )
+
+    # endregion
+
+    # region Construction methods
+    # Dict
+    @classmethod
+    def from_dict(cls, config_dict: dict[str, Any]):
+        """Create configuration from a dictionary.
+
+        Args:
+            config_dict: Dictionary containing configuration values
+
+        Returns:
+            A validated configuration instance
+        """
+        return cls.model_validate(config_dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert configuration to a dictionary.
+
+        Returns:
+            Dictionary representation of the configuration
+        """
+        return self.model_dump()
+
+    # JSON
+    @classmethod
+    def from_json(cls, path: str | Path):
+        """Create configuration from a JSON file.
+
+        Args:
+            path: Path to the JSON file
+
+        Returns:
+            A validated configuration instance
+        """
+        with open(path, "r", encoding="utf-8") as f:
+            config_dict = json.load(f)
+        return cls.model_validate(config_dict)
+
+    def to_json(self, path: str | Path) -> None:
+        """Save configuration to a JSON file.
+
+        Args:
+            path: Path where the JSON file will be saved
+        """
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(self.model_dump(), f, indent=2)
+
+    # YAML
+    @classmethod
+    def from_yaml(cls, path: str | Path):
+        """Create configuration from a YAML file.
+
+        Args:
+            path: Path to the YAML file
+
+        Returns:
+            A validated configuration instance
+
+        Raises:
+            ImportError: If PyYAML is not installed
+        """
+        try:
+            import yaml
+        except ImportError:
+            raise ImportError(
+                "PyYAML is required for YAML support. "
+                "You can either install nshconfig with "
+                "all extras using 'pip install nshconfig[extra]"
+                ", or install with 'pip install PyYAML'"
+            )
+
+        with open(path, "r", encoding="utf-8") as f:
+            config_dict = yaml.safe_load(f)
+        return cls.model_validate(config_dict)
+
+    def to_yaml(self, path: str | Path) -> None:
+        """Save configuration to a YAML file.
+
+        Args:
+            path: Path where the YAML file will be saved
+
+        Raises:
+            ImportError: If PyYAML is not installed
+        """
+        try:
+            import yaml
+        except ImportError:
+            raise ImportError(
+                "PyYAML is required for YAML support. "
+                "You can either install nshconfig with "
+                "all extras using 'pip install nshconfig[extra]"
+                ", or install with 'pip install PyYAML'"
+            )
+
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.dump(self.model_dump(), f)
+
+    # TOML
+    @classmethod
+    def from_toml(cls, path: str | Path):
+        """Create configuration from a TOML file.
+
+        Args:
+            path: Path to the TOML file
+
+        Returns:
+            A validated configuration instance
+
+        Raises:
+            ImportError: If toml is not installed
+        """
+        try:
+            import toml
+        except ImportError:
+            raise ImportError(
+                "toml is required for TOML support. "
+                "You can either install nshconfig with "
+                "all extras using 'pip install nshconfig[extra]"
+                ", or install toml with 'pip install toml'"
+            )
+
+        with open(path, "r", encoding="utf-8") as f:
+            config_dict = toml.load(f)
+        return cls.model_validate(config_dict)
+
+    def to_toml(self, path: str | Path) -> None:
+        """Save configuration to a TOML file.
+
+        Args:
+            path: Path where the TOML file will be saved
+
+        Raises:
+            ImportError: If toml is not installed
+        """
+        try:
+            import toml
+        except ImportError:
+            raise ImportError(
+                "toml is required for TOML support. "
+                "You can either install nshconfig with "
+                "all extras using 'pip install nshconfig[extra]"
+                ", or install with 'pip install toml'"
+            )
+
+        with open(path, "w", encoding="utf-8") as f:
+            toml.dump(self.model_dump(), f)
 
     # endregion

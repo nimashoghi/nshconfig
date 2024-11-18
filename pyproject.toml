@@ -12,9 +12,11 @@ homepage = "https://github.com/nimashoghi/nshconfig"
 python = "^3.10"
 pydantic = "*"
 pydantic-settings = "*"
-treescope = { version = "*", optional = true }
-
 typing-inspect = "*"
+treescope = { version = "*", optional = true }
+PyYAML = { version = "*", optional = true }
+toml = { version = "*", optional = true }
+
 [tool.poetry.group.dev.dependencies]
 pyright = "*"
 ruff = "*"
@@ -41,7 +43,7 @@ ignore = ["F722", "F821", "E731", "E741"]
 required-imports = ["from __future__ import annotations"]
 
 [tool.poetry.extras]
-extra = ["treescope"]
+extra = ["treescope", "PyYAML", "toml"]
 
 [tool.poetry.scripts]
 nshconfig-export = "nshconfig.bin.export:main"
