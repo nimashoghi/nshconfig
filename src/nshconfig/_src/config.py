@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
-import inspect
 import json
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
@@ -410,8 +409,14 @@ class Config(BaseModel, _MutableMappingBase):
         Args:
             path: Path where the JSON file will be saved
         """
+        data = self.model_dump()
+
+        # Add schema reference if available
+        if schema_path := _get_schema_path(type(self)):
+            data["$schema"] = f"file://{schema_path}"
+
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(self.model_dump(), f, indent=2)
+            json.dump(data, f, indent=2)
 
     # YAML
     @classmethod
@@ -460,8 +465,14 @@ class Config(BaseModel, _MutableMappingBase):
                 ", or install with 'pip install PyYAML'"
             )
 
+        data = self.model_dump()
+
+        # Write the file with schema reference if available
         with open(path, "w", encoding="utf-8") as f:
-            yaml.dump(self.model_dump(), f)
+            if schema_path := _get_schema_path(type(self)):
+                # Add YAML language server schema directive
+                f.write(f"# yaml-language-server: $schema=file://{schema_path}\n")
+            yaml.dump(data, f)
 
     # TOML
     @classmethod
@@ -510,7 +521,39 @@ class Config(BaseModel, _MutableMappingBase):
                 ", or install with 'pip install toml'"
             )
 
-        with open(path, "w", encoding="utf-8") as f:
-            toml.dump(self.model_dump(), f)
+        data = self.model_dump()
+
+        # Add schema reference if available
+        if schema_path := _get_schema_path(type(self)):
+            # TOML uses comments for schema references
+            comment = f"#:schema {schema_path}\n"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(comment)
+                toml.dump(data, f)
+        else:
+            with open(path, "w", encoding="utf-8") as f:
+                toml.dump(data, f)
 
     # endregion
+
+
+def _get_schema_path(cls: type[Config]) -> str | None:
+    """Helper to get the absolute schema path for a config class."""
+    from .export import find_config_metadata
+
+    if metadata := find_config_metadata(cls):
+        _, schema_path = metadata
+        if schema_path is not None:
+            # Get the absolute path by looking up from the metadata file location
+            if (
+                spec := importlib.util.find_spec(cls.__module__)
+            ) is None or spec.origin is None:
+                return None
+            module_dir = Path(spec.origin).parent
+            # Look up until we find the .nshconfig.generated.json file
+            current_dir = module_dir
+            while current_dir.parent != current_dir:
+                if (current_dir / ".nshconfig.generated.json").exists():
+                    return str((current_dir / schema_path).resolve().absolute())
+                current_dir = current_dir.parent
+    return None
