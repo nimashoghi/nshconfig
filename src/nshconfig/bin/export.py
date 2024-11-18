@@ -4,6 +4,7 @@ import argparse
 import importlib
 import importlib.util
 import inspect
+import json
 import logging
 import shutil
 import subprocess
@@ -75,7 +76,12 @@ def main():
         "--generate-typed-dicts",
         action=argparse.BooleanOptionalAction,
         help="Generate TypedDicts for config objects",
-        default=False,
+    )
+    parser.add_argument(
+        "-js",
+        "--generate-json-schema",
+        action=argparse.BooleanOptionalAction,
+        help="Generate JSON schema for config objects",
     )
     args = parser.parse_args()
 
@@ -89,6 +95,7 @@ def main():
     ignore_abc: bool = args.ignore_abc
     export_generics: bool = args.export_generics
     generate_typed_dicts: bool = args.generate_typed_dicts
+    generate_json_schema: bool = args.generate_json_schema
 
     # Set up logging
     level = logging.DEBUG if verbose else logging.INFO
@@ -132,6 +139,10 @@ def main():
     # If `generate_typed_dicts`, we need to generate TypedDicts for the config objects.
     if generate_typed_dicts:
         _generate_typed_dicts(config_cls_dict, output)
+
+    # If `generate_json_schema`, we need to generate JSON schema for the config objects.
+    if generate_json_schema:
+        _generate_json_schema(config_cls_dict, output)
 
     # Create export files
     _create_export_files(
@@ -248,7 +259,7 @@ def _generate_typed_dicts(
     For each Config subclass in the config_cls_dict, generate a file with
     the TypedDict definition for the Config subclass. The output file
     path should follow the config subclass, but it should be relative to
-    the output_dir. The filename should be `_{config_cls_name}_typed_dict.py`.
+    the output_dir. The filename should be `{config_cls_name}_typed_dict.py`.
     E.g., `mymodule.a.b.c.Config` should be written to `output_dir/a/b/c/Config_typed_dict.py`.
     """
     # Create typed dict files
@@ -268,11 +279,45 @@ def _generate_typed_dicts(
             typed_dict_code = _config_cls_to_typed_dict_code(config_cls)
 
             # Write the typed dict code to a file
-            output_file = output_path / f"_{config_cls.__name__}_typed_dict.py"
+            output_file = output_path / f"{config_cls.__name__}_typed_dict.py"
             with output_file.open("w") as f:
                 f.write(typed_dict_code)
 
             _run_ruff(output_file)
+
+
+def _generate_json_schema(
+    config_cls_dict: Mapping[str, set[type[Any]]],
+    output_dir: Path,
+):
+    """
+    For each Config subclass in the config_cls_dict, generate a file with
+    the JSON schema definition for the Config subclass. The output
+    file path should follow the config subclass, but it should be relative
+    to the output_dir. The filename should be `{config_cls_name}.schema.json`.
+    E.g., `mymodule.a.b.c.Config` should be written to `output_dir/a/b/c/Config.schema.json`.
+    """
+
+    # Create JSON schema files
+    for module_name, config_classes in config_cls_dict.items():
+        for config_cls in config_classes:
+            # Get the relative path from the module name
+            if module_name == output_dir.name:
+                relative_path = Path()
+            else:
+                relative_path = Path(*module_name.split(".")[1:])
+
+            # Create the directory if it doesn't exist
+            output_path = output_dir / relative_path
+            output_path.mkdir(parents=True, exist_ok=True)
+
+            # Convert the config cls to a JSON schema
+            schema = config_cls.model_json_schema()
+
+            # Write the JSON schema to a file
+            output_file = output_path / f"{config_cls.__name__}.schema.json"
+            with output_file.open("w") as f:
+                f.write(json.dumps(schema, indent=4))
 
 
 def _is_generated_module(module_name: str) -> bool:
@@ -569,9 +614,8 @@ def _create_export_file(
                 root_module,
                 root,
                 file_path,
-                f"_{class_name}_typed_dict",
+                f"{class_name}_typed_dict",
             )
-            # export_module = f"{export_module}_{class_name}_typed_dict"
 
             for export in _typed_dict_file_exports(class_name):
                 _add_line(f"from .{export_module} import {export} as {export}")
