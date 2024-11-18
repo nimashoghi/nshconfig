@@ -6,12 +6,13 @@ import importlib.util
 import inspect
 import logging
 import shutil
-import types
-import typing
+import subprocess
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Annotated, Any
 
+import typing_inspect
 from typing_extensions import TypeAliasType
 
 from nshconfig import Config, Export
@@ -90,8 +91,8 @@ def main():
     modules: list[str] = _find_modules(module, recursive, ignore_module)
 
     # For each module, import it, find all subclasses of Config and export them
-    config_cls_dict = defaultdict(set)
-    alias_dict = defaultdict(dict)
+    config_cls_dict = defaultdict[str, set[type[Any]]](lambda: set[type[Any]]())
+    alias_dict = defaultdict[str, dict[str, Any]](dict)
     for module_name in modules:
         if _is_generated_module(module_name):
             logging.debug(f"Skipping generated module {module_name}")
@@ -126,7 +127,6 @@ def main():
         module,
         config_cls_dict,
         alias_dict,
-        use_dynamic_import,
     )
 
 
@@ -188,7 +188,7 @@ def _find_modules(module_name: str, recursive: bool, ignore_modules: list[str]):
     return modules
 
 
-def _unwrap_type_alias(obj: typing.Any):
+def _unwrap_type_alias(obj: Any):
     # If this is a `TypeAliasType`, resolve the actual type.
     if isinstance(obj, TypeAliasType):
         obj = obj.__value__
@@ -196,12 +196,12 @@ def _unwrap_type_alias(obj: typing.Any):
     return obj
 
 
-def _should_export(obj: typing.Any, ignore_abc: bool, export_generics: bool):
+def _should_export(obj: Any, ignore_abc: bool, export_generics: bool):
     # If this is a `TypeAliasType`, resolve the actual type.
     obj = _unwrap_type_alias(obj)
 
     # First check for Export() metadata in the Annotated[] metadata
-    def _has_export_metadata(obj: typing.Any):
+    def _has_export_metadata(obj: Any):
         try:
             if (
                 metadata := getattr(obj, "__metadata__", None)
@@ -219,7 +219,7 @@ def _should_export(obj: typing.Any, ignore_abc: bool, export_generics: bool):
     # Otherwise, resolve the types. If the type is an nshconfig.Config or
     #   a union of nshconfig.Config types, export it.
     def _is_config_type(
-        obj: typing.Any,
+        obj: Any,
         ignore_abc: bool,
         export_generics: bool,
     ):
@@ -236,29 +236,29 @@ def _should_export(obj: typing.Any, ignore_abc: bool, export_generics: bool):
                 return True
 
             # If this an Annotated type, we need to check the inner type.
-            if typing.get_origin(obj) is typing.Annotated:
+            if typing_inspect.get_origin(obj) is Annotated:
                 return _is_config_type(
-                    typing.get_args(obj)[0], ignore_abc, export_generics
+                    typing_inspect.get_args(obj)[0], ignore_abc, export_generics
                 )
 
             # If this is a Union of Config types, recursively check each type, and
             #   if all types are Config types, export it.
-            if typing.get_origin(obj) in (types.UnionType, typing.Union):
+            if typing_inspect.is_union_type(obj):
                 return all(
                     _is_config_type(t, ignore_abc, export_generics)
-                    for t in typing.get_args(obj)
+                    for t in typing_inspect.get_args(obj)
                 )
 
             # If this is a generic type, we have two cases:
             #  - TypeVar("T", bound=ConfigOrConfigSubclass): export it
             #  - TypeVar("T", ConfigOrConfigSubclass1, [ConfigOrConfigSubclass2, ...]): export it
-            if export_generics and isinstance(obj, typing.TypeVar):
-                if obj.__bound__ is not None:
-                    return _is_config_type(obj.__bound__, ignore_abc, export_generics)
-                if obj.__constraints__:
+            if export_generics and typing_inspect.is_typevar(obj):
+                if (bound := typing_inspect.get_bound(obj)) is not None:
+                    return _is_config_type(bound, ignore_abc, export_generics)
+                if constraints := typing_inspect.get_constraints(obj):
                     return all(
                         _is_config_type(c, ignore_abc, export_generics)
-                        for c in obj.__constraints__
+                        for c in constraints
                     )
 
             # Otherwise, we don't export it.
@@ -336,8 +336,6 @@ def _create_export_files(
 
     # Format files using ruff if available
     try:
-        import subprocess
-
         # First, format.
         subprocess.run(
             ["ruff", "format", str(output_dir.absolute())],
@@ -353,7 +351,7 @@ def _create_export_files(
             ["ruff", "format", str(output_dir.absolute())],
             check=True,
         )
-    except ImportError:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         pass
 
 
