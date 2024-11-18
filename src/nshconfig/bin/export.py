@@ -69,11 +69,6 @@ def main():
         action=argparse.BooleanOptionalAction,
         help="Export generic types",
     )
-    parser.add_argument(
-        "--use-dynamic-import",
-        action=argparse.BooleanOptionalAction,
-        help="Use dynamic import instead of static import",
-    )
     args = parser.parse_args()
 
     # Extract typed arguments
@@ -85,7 +80,6 @@ def main():
     ignore_module: list[str] = args.ignore_module
     ignore_abc: bool = args.ignore_abc
     export_generics: bool = args.export_generics
-    use_dynamic_import: bool = args.use_dynamic_import
 
     # Set up logging
     level = logging.DEBUG if verbose else logging.INFO
@@ -305,17 +299,11 @@ def _create_export_files(
     base_module: str,
     config_cls_dict: dict,
     alias_dict: dict,
-    use_dynamic_import: bool,
 ):
-    # Choose the appropriate export file creation function
-    create_export_file_fn = (
-        _create_export_file if use_dynamic_import else _create_export_file_static_import
-    )
-
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Create the root export file
-    create_export_file_fn(
+    _create_export_file(
         output_dir / "__init__.py",
         base_module,
         config_cls_dict,
@@ -339,7 +327,7 @@ def _create_export_files(
 
             init_file = current_path / "__init__.py"
             if not init_file.exists():
-                create_export_file_fn(
+                _create_export_file(
                     init_file,
                     current_module,
                     config_cls_dict,
@@ -370,106 +358,6 @@ def _create_export_files(
 
 
 def _create_export_file(
-    file_path: Path,
-    module_name: str,
-    config_cls_dict: dict,
-    alias_dict: dict,
-    ignore_autoformat: bool = False,
-):
-    export_lines = []
-    class_names = {}  # To keep track of class names and their modules
-    alias_names = {}  # To keep track of alias names and their modules
-    submodule_exports = set()
-
-    def _add_line(line: str):
-        export_lines.append(line)
-
-    # Add comments to ignore auto-formatting
-    if ignore_autoformat:
-        _add_line("# fmt: off")
-        _add_line("# ruff: noqa")
-        _add_line("# type: ignore")
-        _add_line("")
-
-    # Add codegen marker
-    _add_line(f"{CODEGEN_MARKER}")
-    _add_line("")
-
-    # Add imports
-    _add_line("from typing import TYPE_CHECKING")
-    _add_line("")
-
-    # Collect Config classes, aliases, and submodules
-    for module, config_classes in sorted(config_cls_dict.items()):
-        if module == module_name or module.startswith(f"{module_name}."):
-            for cls in sorted(config_classes, key=lambda c: c.__name__):
-                class_name = cls.__name__
-                if class_name not in class_names or len(module) < len(
-                    class_names[class_name]
-                ):
-                    class_names[class_name] = module
-
-            if module != module_name:
-                submodule = module[len(module_name) + 1 :].split(".")[0]
-                submodule_exports.add(submodule)
-
-    for module, aliases in sorted(alias_dict.items()):
-        if module == module_name or module.startswith(f"{module_name}."):
-            for name in sorted(aliases.keys()):
-                if name not in alias_names or len(module) < len(alias_names[name]):
-                    alias_names[name] = module
-
-            if module != module_name:
-                submodule = module[len(module_name) + 1 :].split(".")[0]
-                submodule_exports.add(submodule)
-
-    # Config/alias imports
-    _add_line("# Config/alias imports")
-    _add_line("")
-
-    # Add type checking imports
-    _add_line("if TYPE_CHECKING:")
-    for class_name, module in sorted(class_names.items()):
-        _add_line(f"    from {module} import {class_name} as {class_name}")
-    for alias_name, module in sorted(alias_names.items()):
-        _add_line(f"    from {module} import {alias_name} as {alias_name}")
-    _add_line("else:")
-
-    # Add dynamic import function
-    _add_line("    def __getattr__(name):")
-    _add_line("        import importlib")
-    _add_line("        if name in globals():")
-    _add_line("            return globals()[name]")
-
-    for class_name, module in sorted(class_names.items()):
-        _add_line(f"        if name == '{class_name}':")
-        _add_line(
-            f"            return importlib.import_module('{module}').{class_name}"
-        )
-
-    for alias_name, module in sorted(alias_names.items()):
-        _add_line(f"        if name == '{alias_name}':")
-        _add_line(
-            f"            return importlib.import_module('{module}').{alias_name}"
-        )
-
-    _add_line(
-        "        raise AttributeError(f\"module '{__name__}' has no attribute '{name}'\")"
-    )
-
-    # Add submodule exports
-    _add_line("")
-    _add_line("# Submodule exports")
-    for submodule in sorted(submodule_exports):
-        _add_line(f"from . import {submodule} as {submodule}")
-
-    # Write export lines
-    with file_path.open("w") as f:
-        for line in export_lines:
-            f.write(line + "\n")
-
-
-def _create_export_file_static_import(
     file_path: Path,
     module_name: str,
     config_cls_dict: dict,
