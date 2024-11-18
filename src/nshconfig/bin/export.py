@@ -8,7 +8,7 @@ import logging
 import shutil
 import subprocess
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -70,6 +70,13 @@ def main():
         action=argparse.BooleanOptionalAction,
         help="Export generic types",
     )
+    parser.add_argument(
+        "-td",
+        "--generate-typed-dicts",
+        action=argparse.BooleanOptionalAction,
+        help="Generate TypedDicts for config objects",
+        default=False,
+    )
     args = parser.parse_args()
 
     # Extract typed arguments
@@ -81,6 +88,7 @@ def main():
     ignore_module: list[str] = args.ignore_module
     ignore_abc: bool = args.ignore_abc
     export_generics: bool = args.export_generics
+    generate_typed_dicts: bool = args.generate_typed_dicts
 
     # Set up logging
     level = logging.DEBUG if verbose else logging.INFO
@@ -121,13 +129,150 @@ def main():
         else:
             output.unlink()
 
+    # If `generate_typed_dicts`, we need to generate TypedDicts for the config objects.
+    if generate_typed_dicts:
+        _generate_typed_dicts(config_cls_dict, output)
+
     # Create export files
     _create_export_files(
         output,
         module,
         config_cls_dict,
         alias_dict,
+        generate_typed_dicts,
     )
+
+
+def _run_ruff(file_path: Path):
+    """Run ruff format and fix imports on a file."""
+    try:
+        # First, format.
+        subprocess.run(
+            ["ruff", "--silent", "format", str(file_path.absolute())],
+            check=True,
+        )
+        # Then, fix imports.
+        subprocess.run(
+            [
+                "ruff",
+                "--silent",
+                "check",
+                "--select",
+                "I",
+                "--fix",
+                str(file_path.absolute()),
+            ],
+            check=True,
+        )
+        # Then, format again.
+        subprocess.run(
+            ["ruff", "--silent", "format", str(file_path.absolute())],
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+
+IMPORTS_TEMPLATE = """\
+if typ.TYPE_CHECKING:
+    from {ConfigModule} import {ConfigClassName}
+"""
+
+TYPED_CREATOR_TEMPLATE = """\
+@typ.overload
+def Create{ConfigClassName}(dict: {TypedDictName}, /) -> {ConfigClassName}: ...
+
+@typ.overload
+def Create{ConfigClassName}(**dict: typ.Unpack[{TypedDictName}]) -> {ConfigClassName}: ...
+
+def Create{ConfigClassName}(*args, **kwargs):
+    from {ConfigModule} import {ConfigClassName}
+
+    dict = args[0] if args else kwargs
+    return {ConfigClassName}.model_validate(dict)
+"""
+
+
+def _typed_dict_name_for_config_cls_name(class_name: str) -> str:
+    """
+    Returns the name of the TypedDict for the given Config subclass.
+    """
+    return f"{class_name}TypedDict"
+
+
+def _typed_dict_file_exports(class_name: str) -> Iterable[str]:
+    """
+    Returns the exports for the typed dict file.
+    """
+    typed_dict_name = _typed_dict_name_for_config_cls_name(class_name)
+    yield f"{typed_dict_name}"
+    yield f"Create{class_name}"
+
+
+def _config_cls_to_typed_dict_code(config_cls: type[Config]) -> str:
+    """
+    Generates the TypedDict code for the given Config subclass.
+    """
+
+    from .._src.json_schema import convert_schema
+
+    # Convert the config cls to a JSON schema
+    schema = config_cls.model_json_schema()
+
+    # Convert the JSON schema to TypedDict code
+    imports = IMPORTS_TEMPLATE.format(
+        ConfigClassName=config_cls.__name__,
+        ConfigModule=config_cls.__module__,
+    )
+    typed_dict_code = convert_schema(
+        schema,
+        _typed_dict_name_for_config_cls_name(config_cls.__name__),
+        f"{imports}\n\n{CODEGEN_MARKER}",
+    )
+
+    # Generate the typed creator code
+    typed_creator_code = TYPED_CREATOR_TEMPLATE.format(
+        ConfigClassName=config_cls.__name__,
+        TypedDictName=_typed_dict_name_for_config_cls_name(config_cls.__name__),
+        ConfigModule=config_cls.__module__,
+    )
+
+    return f"{typed_dict_code}\n\n{typed_creator_code}"
+
+
+def _generate_typed_dicts(
+    config_cls_dict: Mapping[str, set[type[Any]]],
+    output_dir: Path,
+):
+    """
+    For each Config subclass in the config_cls_dict, generate a file with
+    the TypedDict definition for the Config subclass. The output file
+    path should follow the config subclass, but it should be relative to
+    the output_dir. The filename should be `_{config_cls_name}_typed_dict.py`.
+    E.g., `mymodule.a.b.c.Config` should be written to `output_dir/a/b/c/Config_typed_dict.py`.
+    """
+    # Create typed dict files
+    for module_name, config_classes in config_cls_dict.items():
+        for config_cls in config_classes:
+            # Get the relative path from the module name
+            if module_name == output_dir.name:
+                relative_path = Path()
+            else:
+                relative_path = Path(*module_name.split(".")[1:])
+
+            # Create the directory if it doesn't exist
+            output_path = output_dir / relative_path
+            output_path.mkdir(parents=True, exist_ok=True)
+
+            # Generate the typed dict code
+            typed_dict_code = _config_cls_to_typed_dict_code(config_cls)
+
+            # Write the typed dict code to a file
+            output_file = output_path / f"_{config_cls.__name__}_typed_dict.py"
+            with output_file.open("w") as f:
+                f.write(typed_dict_code)
+
+            _run_ruff(output_file)
 
 
 def _is_generated_module(module_name: str) -> bool:
@@ -299,6 +444,7 @@ def _create_export_files(
     base_module: str,
     config_cls_dict: dict,
     alias_dict: dict,
+    generate_typed_dicts: bool,
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -308,23 +454,32 @@ def _create_export_files(
         base_module,
         config_cls_dict,
         alias_dict,
+        generate_typed_dicts,
+        root=output_dir,
+        root_module=base_module,
     )
 
     # Create hierarchical export files
     all_modules = set(config_cls_dict.keys()) | set(alias_dict.keys())
+    # Iterate through all modules found in config_cls_dict and alias_dict
     for module_name in all_modules:
+        # Skip base module since we already created its export file
         if module_name == base_module:
             continue
 
+        # Get the path relative to base module and split into components
         relative_path = module_name[len(base_module) + 1 :].split(".")
         current_path = output_dir
         current_module = base_module
 
+        # Create directories and __init__.py files for each component
         for part in relative_path:
+            # Build up the directory path and module name
             current_path = current_path / part
             current_path.mkdir(exist_ok=True)
             current_module = f"{current_module}.{part}"
 
+            # Create __init__.py if it doesn't exist
             init_file = current_path / "__init__.py"
             if not init_file.exists():
                 _create_export_file(
@@ -332,27 +487,13 @@ def _create_export_files(
                     current_module,
                     config_cls_dict,
                     alias_dict,
+                    generate_typed_dicts,
+                    root=output_dir,
+                    root_module=base_module,
                 )
 
     # Format files using ruff if available
-    try:
-        # First, format.
-        subprocess.run(
-            ["ruff", "format", str(output_dir.absolute())],
-            check=True,
-        )
-        # Then, fix imports.
-        subprocess.run(
-            ["ruff", "check", "--select", "I", "--fix", str(output_dir.absolute())],
-            check=True,
-        )
-        # Then, format again.
-        subprocess.run(
-            ["ruff", "format", str(output_dir.absolute())],
-            check=True,
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        pass
+    _run_ruff(output_dir)
 
 
 def _create_export_file(
@@ -360,7 +501,11 @@ def _create_export_file(
     module_name: str,
     config_cls_dict: dict,
     alias_dict: dict,
+    generate_typed_dicts: bool,
     ignore_autoformat: bool = False,
+    *,
+    root: Path,
+    root_module: str,
 ):
     export_lines = []
     class_names = {}  # To keep track of class names and their modules
@@ -409,14 +554,30 @@ def _create_export_file(
     for class_name, module in sorted(class_names.items()):
         _add_line(f"from {module} import {class_name} as {class_name}")
 
-    if class_names:
-        _add_line("")
+    _add_line("")
 
     for alias_name, module in sorted(alias_names.items()):
         _add_line(f"from {module} import {alias_name} as {alias_name}")
 
-    if alias_names:
-        _add_line("")
+    _add_line("")
+
+    # Generate TypedDict imports
+    if generate_typed_dicts:
+        for class_name, module in sorted(class_names.items()):
+            export_module = _to_export_module(
+                module,
+                root_module,
+                root,
+                file_path,
+                f"_{class_name}_typed_dict",
+            )
+            # export_module = f"{export_module}_{class_name}_typed_dict"
+
+            for export in _typed_dict_file_exports(class_name):
+                _add_line(f"from .{export_module} import {export} as {export}")
+
+        if class_names:
+            _add_line("")
 
     # Add submodule exports
     for submodule in sorted(submodule_exports):
@@ -426,6 +587,30 @@ def _create_export_file(
     with file_path.open("w") as f:
         for line in export_lines:
             f.write(line + "\n")
+
+
+def _to_export_module(
+    module: str,
+    root_module: str,
+    root: Path,
+    file_path: Path,
+    leaf: str,
+) -> str:
+    # First, get the relative path of module from root_module
+    root_path = Path(*root_module.split("."))
+    module_path = Path(*module.split("."))
+    relative_path = module_path.relative_to(root_path)
+
+    # Then, join the relative path with the root directory
+    export_module = root / relative_path
+
+    # Finally, get that path relative to the file path
+    export_module = export_module.relative_to(file_path.parent)
+    export_module = export_module / leaf
+
+    # Convert the path to a module name
+    export_module = export_module.with_suffix("").as_posix().replace("/", ".")
+    return export_module
 
 
 if __name__ == "__main__":
