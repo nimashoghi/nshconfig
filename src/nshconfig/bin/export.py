@@ -299,9 +299,7 @@ def _create_export_files(
 ):
     # Choose the appropriate export file creation function
     create_export_file_fn = (
-        _create_export_file_dynamic_import
-        if use_dynamic_import
-        else _create_export_file_static_import
+        _create_export_file if use_dynamic_import else _create_export_file_static_import
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -361,7 +359,7 @@ def _create_export_files(
         pass
 
 
-def _create_export_file_dynamic_import(
+def _create_export_file(
     file_path: Path,
     module_name: str,
     config_cls_dict: dict,
