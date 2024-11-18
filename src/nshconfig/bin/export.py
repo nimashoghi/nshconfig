@@ -76,13 +76,24 @@ def main():
     )
     args = parser.parse_args()
 
+    # Extract typed arguments
+    module: str = args.module
+    output: Path = args.output
+    remove_existing: bool = args.remove_existing
+    recursive: bool = args.recursive
+    verbose: bool = args.verbose
+    ignore_module: list[str] = args.ignore_module
+    ignore_abc: bool = args.ignore_abc
+    export_generics: bool = args.export_generics
+    use_dynamic_import: bool = args.use_dynamic_import
+
     # Set up logging
-    level = logging.DEBUG if args.verbose else logging.INFO
+    level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level)
     logging.debug(f"Arguments: {args}")
 
     # Find all modules to export
-    modules: list[str] = _find_modules(args.module, args.recursive, args.ignore_module)
+    modules: list[str] = _find_modules(module, recursive, ignore_module)
 
     # For each module, import it, find all subclasses of Config and export them
     config_cls_dict = defaultdict(set)
@@ -95,33 +106,33 @@ def main():
         logging.debug(f"Exporting configurations from {module_name}")
         for config_cls in _module_configs(
             module_name,
-            args.ignore_abc,
-            args.export_generics,
+            ignore_abc,
+            export_generics,
         ):
             logging.debug(f"Exporting {config_cls}")
             config_cls_dict[module_name].add(config_cls)
 
         for name, obj in _alias_configs(
             module_name,
-            args.ignore_abc,
-            args.export_generics,
+            ignore_abc,
+            export_generics,
         ):
             alias_dict[module_name][name] = obj
 
     # Just remove the output directory if remove_existing is True
-    if args.remove_existing and args.output.exists():
-        if args.output.is_dir():
-            shutil.rmtree(args.output)
+    if remove_existing and output.exists():
+        if output.is_dir():
+            shutil.rmtree(output)
         else:
-            args.output.unlink()
+            output.unlink()
 
     # Create export files
     _create_export_files(
-        args.output,
-        args.module,
+        output,
+        module,
         config_cls_dict,
         alias_dict,
-        args.use_dynamic_import,
+        use_dynamic_import,
     )
 
 
@@ -203,9 +214,8 @@ def _should_export(obj: typing.Any, ignore_abc: bool, export_generics: bool):
             ) is None or not isinstance(metadata, Iterable):
                 return False
 
-            for m in metadata:
-                if isinstance(m, Export):
-                    return True
+            if any(isinstance(m, Export) for m in metadata):
+                return True
         except TypeError:
             return False
 
