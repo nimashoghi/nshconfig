@@ -30,12 +30,6 @@ class ConfigDict(_ConfigDict, total=False):
     Defaults to `False`.
     """
 
-    write_schema_to_file: bool
-    """
-    Whether to write the JSON schema to a file.
-    Defaults to `False`.
-    """
-
     no_validate_assignment_for_draft: bool
     """
     Whether to disable the validation of assignments for draft configs.
@@ -363,22 +357,5 @@ class Config(BaseModel, _MutableMappingBase):
             subtree_renderer=subtree_renderer,
             roundtrippable=True,
         )
-
-    # endregion
-
-    # region JSON Schema
-    @classmethod
-    def __pydantic_init_subclass__(cls, **kwargs: Any):
-        super().__pydantic_init_subclass__(**kwargs)
-
-        # If requested, write the schema to a file.
-        if cls.model_config.get("write_schema_to_file", False):
-            cls_file_path = inspect.getfile(cls)
-            if cls_file_path:
-                # Save the schema to a file with the same name as the class.
-                dest = Path(cls_file_path).with_suffix(f".{cls.__name__}.schema.json")
-                if cls.model_rebuild(force=True) is not False:
-                    json_schema = cls.model_json_schema()
-                    _ = dest.write_text(json.dumps(json_schema, indent=2))
 
     # endregion
