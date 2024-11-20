@@ -246,15 +246,15 @@ def _run_ruff(file_path: Path):
     try:
         # First, format.
         subprocess.run(
-            ["ruff", "--silent", "format", str(file_path.absolute())],
+            ["ruff", "format", "--silent", str(file_path.absolute())],
             check=True,
         )
         # Then, fix imports.
         subprocess.run(
             [
                 "ruff",
-                "--silent",
                 "check",
+                "--silent",
                 "--select",
                 "I",
                 "--fix",
@@ -264,7 +264,7 @@ def _run_ruff(file_path: Path):
         )
         # Then, format again.
         subprocess.run(
-            ["ruff", "--silent", "format", str(file_path.absolute())],
+            ["ruff", "format", "--silent", str(file_path.absolute())],
             check=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
