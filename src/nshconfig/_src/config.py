@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import json
+import logging
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast
@@ -13,6 +14,8 @@ from typing_extensions import Unpack, override
 
 from .missing import MISSING as _MISSING
 from .missing import validate_no_missing_values
+
+log = logging.getLogger(__name__)
 
 _MutableMappingBase = MutableMapping[str, Any]
 if TYPE_CHECKING:
@@ -390,29 +393,60 @@ class Config(BaseModel, _MutableMappingBase):
 
     # JSON
 
-    def to_json_str(self, /, with_schema: bool = True) -> str:
+    def to_json_str(
+        self,
+        /,
+        with_schema: bool = True,
+        indent: int | None = 4,
+    ) -> str:
         """Dump configuration to a JSON string.
 
         Args:
             with_schema: Whether to include the schema reference in the JSON file
+            indent: Number of spaces to use for indentation
         """
-        data = self.model_dump()
+        json_str = self.model_dump_json(indent=indent)
 
         # Add schema reference if available and with_schema is True
         if with_schema and (schema_uri := _get_schema_uri(type(self))):
-            data["$schema"] = schema_uri
+            try:
+                # A bit hacky here, but we will re-load the JSON,
+                # add the $schema key, and then dump it again.
+                json_obj = json.loads(json_str)
+                if isinstance(json_obj, MutableMapping):
+                    json_obj["$schema"] = schema_uri
+                    json_str = json.dumps(json_obj, indent=indent)
+                else:
+                    log.warning(
+                        "Could not add schema reference to JSON string. "
+                        "The JSON object is not a dictionary. "
+                        "The schema reference will not be added."
+                    )
+            except json.JSONDecodeError:
+                log.warning(
+                    "Could not add schema reference to JSON string. "
+                    "The JSON string is not valid JSON. "
+                    "The schema reference will not be added."
+                )
 
-        return self.model_dump_json(indent=4)
+        return json_str
 
-    def to_json_file(self, path: str | Path, /, with_schema: bool = True) -> None:
+    def to_json_file(
+        self,
+        path: str | Path,
+        /,
+        with_schema: bool = True,
+        indent: int | None = 4,
+    ) -> None:
         """Save configuration to a JSON file.
 
         Args:
             path: Path where the JSON file will be saved
             with_schema: Whether to include the schema reference in the JSON file
+            indent: Number of spaces to use for indentation
         """
         with open(path, "w", encoding="utf-8") as f:
-            f.write(self.to_json_str(with_schema=with_schema))
+            f.write(self.to_json_str(with_schema=with_schema, indent=indent))
 
     @classmethod
     def from_json_str(cls, json_str: str, /):
@@ -439,11 +473,12 @@ class Config(BaseModel, _MutableMappingBase):
         with open(path, "r", encoding="utf-8") as f:
             return cls.from_json_str(f.read())
 
-    def to_yaml_str(self, /, with_schema: bool = True):
+    def to_yaml_str(self, /, with_schema: bool = True, indent: int | None = 4) -> str:
         """Dump configuration to a YAML string.
 
         Args:
             with_schema: Whether to include the schema reference in the YAML string
+            indent: Number of spaces to use for indentation
 
         Raises:
             ImportError: If pydantic-yaml is not installed
@@ -457,7 +492,7 @@ class Config(BaseModel, _MutableMappingBase):
                 "all extras using 'pip install nshconfig[extra]"
                 ", or install with 'pip install pydantic-yaml'"
             )
-        data_str = to_yaml_str(self, indent=4)
+        data_str = to_yaml_str(self, indent=indent)
 
         # Add YAML language server schema directive if with_schema is True
         if with_schema and (schema_uri := _get_schema_uri(type(self))):
@@ -465,19 +500,26 @@ class Config(BaseModel, _MutableMappingBase):
 
         return data_str
 
-    def to_yaml_file(self, path: str | Path, /, with_schema: bool = True) -> None:
+    def to_yaml_file(
+        self,
+        path: str | Path,
+        /,
+        with_schema: bool = True,
+        indent: int | None = 4,
+    ) -> None:
         """Save configuration to a YAML file.
 
         Args:
             path: Path where the YAML file will be saved
             with_schema: Whether to include the schema reference in the YAML file
+            indent: Number of spaces to use for indentation
 
         Raises:
             ImportError: If pydantic-yaml is not installed
         """
         # Write the file
         with open(path, "w", encoding="utf-8") as f:
-            f.write(self.to_yaml_str(with_schema=with_schema))
+            f.write(self.to_yaml_str(with_schema=with_schema, indent=indent))
 
     @classmethod
     def from_yaml_str(cls, yaml_str: str, /):
