@@ -390,7 +390,7 @@ class Config(BaseModel, _MutableMappingBase):
 
     # JSON
 
-    def to_json(self, path: str | Path, with_schema: bool = False) -> None:
+    def to_json(self, path: str | Path, with_schema: bool = True) -> None:
         """Save configuration to a JSON file.
 
         Args:
@@ -400,8 +400,8 @@ class Config(BaseModel, _MutableMappingBase):
         data = self.model_dump()
 
         # Add schema reference if available and with_schema is True
-        if with_schema and (schema_path := _get_schema_path(type(self))):
-            data["$schema"] = f"file://{schema_path}"
+        if with_schema and (schema_uri := _get_schema_uri(type(self))):
+            data["$schema"] = schema_uri
 
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
@@ -420,7 +420,7 @@ class Config(BaseModel, _MutableMappingBase):
             config_dict = json.load(f)
         return cls.model_validate(config_dict)
 
-    def to_yaml(self, path: str | Path, with_schema: bool = False) -> None:
+    def to_yaml(self, path: str | Path, with_schema: bool = True) -> None:
         """Save configuration to a YAML file.
 
         Args:
@@ -442,10 +442,8 @@ class Config(BaseModel, _MutableMappingBase):
         data_str = to_yaml_str(self)
 
         # Add YAML language server schema directive if with_schema is True
-        if with_schema and (schema_path := _get_schema_path(type(self))):
-            data_str = (
-                f"# yaml-language-server: $schema=file://{schema_path}\n\n" + data_str
-            )
+        if with_schema and (schema_uri := _get_schema_uri(type(self))):
+            data_str = f"# yaml-language-server: $schema={schema_uri}\n\n" + data_str
 
         # Write the file
         with open(path, "w", encoding="utf-8") as f:
@@ -479,8 +477,12 @@ class Config(BaseModel, _MutableMappingBase):
     # endregion
 
 
-def _get_schema_path(cls: type[Config]) -> str | None:
+def _get_schema_uri(cls: type[Config]) -> str | None:
     """Helper to get the absolute schema path for a config class."""
+    # First check for __nshconfig_json_schema_uri__ directly on the class (not inherited)
+    if "__nshconfig_json_schema_uri__" in cls.__dict__:
+        return getattr(cls, "__nshconfig_json_schema_uri__")
+
     from .export import find_config_metadata
 
     if metadata := find_config_metadata(cls):
@@ -496,6 +498,7 @@ def _get_schema_path(cls: type[Config]) -> str | None:
             current_dir = module_dir
             while current_dir.parent != current_dir:
                 if (current_dir / ".nshconfig.generated.json").exists():
-                    return str((current_dir / schema_path).resolve().absolute())
+                    file_path = str((current_dir / schema_path).resolve().absolute())
+                    return f"file://{file_path}"
                 current_dir = current_dir.parent
     return None
