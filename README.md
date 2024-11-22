@@ -10,6 +10,11 @@ Fully typed configuration management, powered by [Pydantic](https://github.com/p
     - [Draft Configs](#draft-configs)
         - [Motivation](#motivation-1)
         - [Usage Guide](#usage-guide)
+    - [Configuration Formats](#configuration-formats)
+        - [JSON Support](#json-support)
+        - [YAML Support](#yaml-support)
+        - [Dictionary Support](#dictionary-support)
+        - [Schema References](#schema-references)
     - [Dynamic Type Registry](#dynamic-type-registry)
         - [Basic Usage](#basic-usage)
         - [Plugin System Support](#plugin-system-support)
@@ -116,6 +121,97 @@ The primary motivation behind draft configs is to provide a cleaner and more Pyt
    ```
 
 Based on your code and its functionality, I'll write a new section for the README that showcases the Registry feature. Here's my suggested addition:
+
+### Configuration Formats
+
+nshconfig supports multiple formats for creating and serializing configurations, making it flexible for different use cases:
+
+#### JSON Support
+
+You can create and save configurations using JSON:
+
+```python
+import nshconfig as C
+
+class ModelConfig(C.Config):
+    hidden_size: int
+    num_layers: int
+
+# Create from JSON string
+config1 = ModelConfig.from_json_str('{"hidden_size": 256, "num_layers": 4}')
+
+# Load from JSON file
+config2 = ModelConfig.from_json_file("model_config.json")
+
+# Save to JSON string
+json_str = config1.to_json_str()
+
+# Save to JSON file
+config1.to_json_file("model_config.json")
+```
+
+#### YAML Support
+
+YAML support requires installing the optional dependency:
+```bash
+pip install "nshconfig[yaml]"
+```
+
+Then you can work with YAML formats:
+
+```python
+class ModelConfig(C.Config):
+    hidden_size: int
+    num_layers: int
+
+# Create from YAML string
+config1 = ModelConfig.from_yaml_str("""
+hidden_size: 256
+num_layers: 4
+""")
+
+# Load from YAML file
+config2 = ModelConfig.from_yaml("model_config.yaml")
+
+# Save to YAML string
+yaml_str = config1.to_yaml_str()
+
+# Save to YAML file
+config1.to_yaml_file("model_config.yaml")
+```
+
+#### Dictionary Support
+
+You can also create configurations directly from Python dictionaries:
+
+```python
+class ModelConfig(C.Config):
+    hidden_size: int
+    num_layers: int
+
+# Create from dictionary
+config = ModelConfig.from_dict({
+    "hidden_size": 256,
+    "num_layers": 4
+})
+
+# Convert to dictionary
+config_dict = config.to_dict()
+```
+
+#### Schema References
+
+When saving to JSON or YAML, you can include schema references that enable better IDE support:
+
+```python
+# Include schema reference in JSON
+config.to_json_file("config.json", with_schema=True)
+
+# Include schema reference in YAML
+config.to_yaml_file("config.yaml", with_schema=True)
+```
+
+The schema references help IDEs provide autocompletion and validation when editing the configuration files.
 
 ### Dynamic Type Registry
 
