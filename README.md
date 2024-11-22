@@ -152,9 +152,14 @@ config1.to_json_file("model_config.json")
 
 #### YAML Support
 
-YAML support requires installing the optional dependency:
+YAML support requires installing the `pydantic-yaml` package, either by installing the `yaml` extra:
 ```bash
-pip install "nshconfig[yaml]"
+pip install "nshconfig[extra]" # Installs all extras
+pip install "nshconfig[yaml]" # Installs only the YAML extra
+```
+or by installing the package directly:
+```bash
+pip install pydantic-yaml
 ```
 
 Then you can work with YAML formats:

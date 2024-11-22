@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "nshconfig"
-version = "0.29.0"
+version = "0.29.1"
 description = "Fully typed configuration management, powered by Pydantic"
 authors = ["Nima Shoghi <nimashoghi@gmail.com>"]
 readme = "README.md"
@@ -43,6 +43,7 @@ required-imports = ["from __future__ import annotations"]
 
 [tool.poetry.extras]
 extra = ["treescope", "pydantic-yaml"]
+yaml = ["pydantic-yaml"]
 
 [tool.poetry.scripts]
 nshconfig-export = "nshconfig.bin.export:main"
