@@ -390,11 +390,10 @@ class Config(BaseModel, _MutableMappingBase):
 
     # JSON
 
-    def to_json(self, path: str | Path, with_schema: bool = True) -> None:
-        """Save configuration to a JSON file.
+    def to_json_str(self, /, with_schema: bool = True) -> str:
+        """Dump configuration to a JSON string.
 
         Args:
-            path: Path where the JSON file will be saved
             with_schema: Whether to include the schema reference in the JSON file
         """
         data = self.model_dump()
@@ -403,11 +402,32 @@ class Config(BaseModel, _MutableMappingBase):
         if with_schema and (schema_uri := _get_schema_uri(type(self))):
             data["$schema"] = schema_uri
 
+        return self.model_dump_json(indent=4)
+
+    def to_json_file(self, path: str | Path, /, with_schema: bool = True) -> None:
+        """Save configuration to a JSON file.
+
+        Args:
+            path: Path where the JSON file will be saved
+            with_schema: Whether to include the schema reference in the JSON file
+        """
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+            f.write(self.to_json_str(with_schema=with_schema))
 
     @classmethod
-    def from_json(cls, path: str | Path):
+    def from_json_str(cls, json_str: str, /):
+        """Create configuration from a JSON string.
+
+        Args:
+            json_str: JSON string
+
+        Returns:
+            A validated configuration instance
+        """
+        return cls.model_validate_json(json_str)
+
+    @classmethod
+    def from_json_file(cls, path: str | Path, /):
         """Create configuration from a JSON file.
 
         Args:
@@ -417,15 +437,13 @@ class Config(BaseModel, _MutableMappingBase):
             A validated configuration instance
         """
         with open(path, "r", encoding="utf-8") as f:
-            config_dict = json.load(f)
-        return cls.model_validate(config_dict)
+            return cls.from_json_str(f.read())
 
-    def to_yaml(self, path: str | Path, with_schema: bool = True) -> None:
-        """Save configuration to a YAML file.
+    def to_yaml_str(self, /, with_schema: bool = True):
+        """Dump configuration to a YAML string.
 
         Args:
-            path: Path where the YAML file will be saved
-            with_schema: Whether to include the schema reference in the YAML file
+            with_schema: Whether to include the schema reference in the YAML string
 
         Raises:
             ImportError: If pydantic-yaml is not installed
@@ -439,18 +457,55 @@ class Config(BaseModel, _MutableMappingBase):
                 "all extras using 'pip install nshconfig[extra]"
                 ", or install with 'pip install pydantic-yaml'"
             )
-        data_str = to_yaml_str(self)
+        data_str = to_yaml_str(self, indent=4)
 
         # Add YAML language server schema directive if with_schema is True
         if with_schema and (schema_uri := _get_schema_uri(type(self))):
             data_str = f"# yaml-language-server: $schema={schema_uri}\n\n" + data_str
 
+        return data_str
+
+    def to_yaml_file(self, path: str | Path, /, with_schema: bool = True) -> None:
+        """Save configuration to a YAML file.
+
+        Args:
+            path: Path where the YAML file will be saved
+            with_schema: Whether to include the schema reference in the YAML file
+
+        Raises:
+            ImportError: If pydantic-yaml is not installed
+        """
         # Write the file
         with open(path, "w", encoding="utf-8") as f:
-            f.write(data_str)
+            f.write(self.to_yaml_str(with_schema=with_schema))
 
     @classmethod
-    def from_yaml(cls, path: str | Path):
+    def from_yaml_str(cls, yaml_str: str, /):
+        """Create configuration from a YAML string.
+
+        Args:
+            yaml_str: YAML string
+
+        Returns:
+            A validated configuration instance
+
+        Raises:
+            ImportError: If pydantic-yaml is not installed
+        """
+        try:
+            from pydantic_yaml import parse_yaml_raw_as
+        except ImportError:
+            raise ImportError(
+                "Pydantic-yaml is required for YAML support. "
+                "You can either install nshconfig with "
+                "all extras using 'pip install nshconfig[extra]"
+                ", or install with 'pip install pydantic-yaml'"
+            )
+
+        return parse_yaml_raw_as(cls, yaml_str)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path, /):
         """Create configuration from a YAML file.
 
         Args:
