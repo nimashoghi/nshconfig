@@ -389,6 +389,23 @@ class Config(BaseModel, _MutableMappingBase):
         return self.model_dump()
 
     # JSON
+
+    def to_json(self, path: str | Path, with_schema: bool = False) -> None:
+        """Save configuration to a JSON file.
+
+        Args:
+            path: Path where the JSON file will be saved
+            with_schema: Whether to include the schema reference in the JSON file
+        """
+        data = self.model_dump()
+
+        # Add schema reference if available and with_schema is True
+        if with_schema and (schema_path := _get_schema_path(type(self))):
+            data["$schema"] = f"file://{schema_path}"
+
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+
     @classmethod
     def from_json(cls, path: str | Path):
         """Create configuration from a JSON file.
@@ -403,22 +420,37 @@ class Config(BaseModel, _MutableMappingBase):
             config_dict = json.load(f)
         return cls.model_validate(config_dict)
 
-    def to_json(self, path: str | Path) -> None:
-        """Save configuration to a JSON file.
+    def to_yaml(self, path: str | Path, with_schema: bool = False) -> None:
+        """Save configuration to a YAML file.
 
         Args:
-            path: Path where the JSON file will be saved
+            path: Path where the YAML file will be saved
+            with_schema: Whether to include the schema reference in the YAML file
+
+        Raises:
+            ImportError: If pydantic-yaml is not installed
         """
-        data = self.model_dump()
+        try:
+            from pydantic_yaml import to_yaml_str
+        except ImportError:
+            raise ImportError(
+                "Pydantic-yaml is required for YAML support. "
+                "You can either install nshconfig with "
+                "all extras using 'pip install nshconfig[extra]"
+                ", or install with 'pip install pydantic-yaml'"
+            )
+        data_str = to_yaml_str(self)
 
-        # Add schema reference if available
-        if schema_path := _get_schema_path(type(self)):
-            data["$schema"] = f"file://{schema_path}"
+        # Add YAML language server schema directive if with_schema is True
+        if with_schema and (schema_path := _get_schema_path(type(self))):
+            data_str = (
+                f"# yaml-language-server: $schema=file://{schema_path}\n\n" + data_str
+            )
 
+        # Write the file
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+            f.write(data_str)
 
-    # YAML
     @classmethod
     def from_yaml(cls, path: str | Path):
         """Create configuration from a YAML file.
@@ -430,109 +462,19 @@ class Config(BaseModel, _MutableMappingBase):
             A validated configuration instance
 
         Raises:
-            ImportError: If PyYAML is not installed
+            ImportError: If pydantic-yaml is not installed
         """
         try:
-            import yaml
+            from pydantic_yaml import parse_yaml_file_as
         except ImportError:
             raise ImportError(
-                "PyYAML is required for YAML support. "
+                "Pydantic-yaml is required for YAML support. "
                 "You can either install nshconfig with "
                 "all extras using 'pip install nshconfig[extra]"
-                ", or install with 'pip install PyYAML'"
+                ", or install with 'pip install pydantic-yaml'"
             )
 
-        with open(path, "r", encoding="utf-8") as f:
-            config_dict = yaml.safe_load(f)
-        return cls.model_validate(config_dict)
-
-    def to_yaml(self, path: str | Path) -> None:
-        """Save configuration to a YAML file.
-
-        Args:
-            path: Path where the YAML file will be saved
-
-        Raises:
-            ImportError: If PyYAML is not installed
-        """
-        try:
-            import yaml
-        except ImportError:
-            raise ImportError(
-                "PyYAML is required for YAML support. "
-                "You can either install nshconfig with "
-                "all extras using 'pip install nshconfig[extra]"
-                ", or install with 'pip install PyYAML'"
-            )
-
-        data = self.model_dump()
-
-        # Write the file with schema reference if available
-        with open(path, "w", encoding="utf-8") as f:
-            if schema_path := _get_schema_path(type(self)):
-                # Add YAML language server schema directive
-                f.write(f"# yaml-language-server: $schema=file://{schema_path}\n")
-            yaml.dump(data, f)
-
-    # TOML
-    @classmethod
-    def from_toml(cls, path: str | Path):
-        """Create configuration from a TOML file.
-
-        Args:
-            path: Path to the TOML file
-
-        Returns:
-            A validated configuration instance
-
-        Raises:
-            ImportError: If toml is not installed
-        """
-        try:
-            import toml
-        except ImportError:
-            raise ImportError(
-                "toml is required for TOML support. "
-                "You can either install nshconfig with "
-                "all extras using 'pip install nshconfig[extra]"
-                ", or install toml with 'pip install toml'"
-            )
-
-        with open(path, "r", encoding="utf-8") as f:
-            config_dict = toml.load(f)
-        return cls.model_validate(config_dict)
-
-    def to_toml(self, path: str | Path) -> None:
-        """Save configuration to a TOML file.
-
-        Args:
-            path: Path where the TOML file will be saved
-
-        Raises:
-            ImportError: If toml is not installed
-        """
-        try:
-            import toml
-        except ImportError:
-            raise ImportError(
-                "toml is required for TOML support. "
-                "You can either install nshconfig with "
-                "all extras using 'pip install nshconfig[extra]"
-                ", or install with 'pip install toml'"
-            )
-
-        data = self.model_dump()
-
-        # Add schema reference if available
-        if schema_path := _get_schema_path(type(self)):
-            # TOML uses comments for schema references
-            comment = f"#:schema {schema_path}\n"
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(comment)
-                toml.dump(data, f)
-        else:
-            with open(path, "w", encoding="utf-8") as f:
-                toml.dump(data, f)
+        return parse_yaml_file_as(cls, path)
 
     # endregion
 

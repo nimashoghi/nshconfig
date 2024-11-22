@@ -14,8 +14,7 @@ pydantic = "*"
 pydantic-settings = "*"
 typing-inspect = "*"
 treescope = { version = "*", optional = true }
-PyYAML = { version = "*", optional = true }
-toml = { version = "*", optional = true }
+pydantic-yaml = { version = "*", optional = true }
 
 [tool.poetry.group.dev.dependencies]
 pyright = "*"
@@ -43,7 +42,7 @@ ignore = ["F722", "F821", "E731", "E741"]
 required-imports = ["from __future__ import annotations"]
 
 [tool.poetry.extras]
-extra = ["treescope", "PyYAML", "toml"]
+extra = ["treescope", "pydantic-yaml"]
 
 [tool.poetry.scripts]
 nshconfig-export = "nshconfig.bin.export:main"
