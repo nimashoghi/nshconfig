@@ -6,14 +6,19 @@ import json
 import logging
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, get_origin
 
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, PrivateAttr, model_serializer
 from pydantic import ConfigDict as _ConfigDict
-from typing_extensions import Unpack, override
+from pydantic.main import IncEx
+from typing_extensions import TypedDict, Unpack, override
 
 from .missing import MISSING as _MISSING
 from .missing import validate_no_missing_values
+
+if TYPE_CHECKING:
+    from ruamel.yaml import YAML
+
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +42,52 @@ class ConfigDict(_ConfigDict, total=False):
     Whether to disable the validation of assignments for draft configs.
     Defaults to `True`.
     """
+
+
+class DumpKwargs(TypedDict, total=False):
+    include: IncEx | None
+    """Field(s) to include in the JSON output."""
+    exclude: IncEx | None
+    """Field(s) to exclude from the JSON output."""
+    context: Any | None
+    """Additional context to pass to the serializer."""
+    by_alias: bool
+    """Whether to serialize using field aliases."""
+    exclude_unset: bool
+    """Whether to exclude fields that have not been explicitly set."""
+    exclude_defaults: bool
+    """Whether to exclude fields that are set to their default value."""
+    exclude_none: bool
+    """Whether to exclude fields that have a value of `None`."""
+    round_trip: bool
+    """If True, dumped values should be valid as input for non-idempotent types such as Json[T]."""
+    warnings: bool | Literal["none", "warn", "error"]
+    """How to handle serialization errors. False/"none" ignores them, True/"warn" logs errors, "error" raises a [`PydanticSerializationError`][pydantic_core.PydanticSerializationError]."""
+    serialize_as_any: bool
+    """Whether to serialize fields with duck-typing serialization behavior."""
+
+
+class YamlDumpKwargs(DumpKwargs, total=False):
+    default_flow_style: bool | None
+    """Whether to use "flow style" (more human-readable).
+    https://yaml.readthedocs.io/en/latest/detail.html?highlight=default_flow_style#indentation-of-block-sequences
+    """
+    map_indent: int | None
+    """Indent value for mappings."""
+    sequence_indent: int | None
+    """Indent value for sequences."""
+    sequence_dash_offset: int | None
+    """Indent value for the dash in sequences."""
+    custom_yaml_writer: "YAML | None"
+    """An instance of ruamel.yaml.YAML (or a subclass) to use as the writer.
+    The above options will be set on it, if given."""
+
+
+_DEFAULT_JSON_DUMP_KWARGS: DumpKwargs = {}
+_DEFAULT_YAML_DUMP_KWARGS: YamlDumpKwargs = {
+    "sequence_dash_offset": 0,
+    # For some reason, ^ is necessary to get a properly parsable YAML output
+}
 
 
 class Config(BaseModel, _MutableMappingBase):
@@ -368,6 +419,15 @@ class Config(BaseModel, _MutableMappingBase):
         )
 
     # endregion
+    @model_serializer(mode="wrap")
+    def include_literals(self, next_serializer):
+        """Include fields with the `Literal` annotation in the dumped data,
+        even if `exclude_defaults` is `True`."""
+        dumped = next_serializer(self)
+        for name, field_info in self.model_fields.items():
+            if get_origin(field_info.annotation) == Literal:
+                dumped[name] = getattr(self, name)
+        return dumped
 
     # region Construction methods
     # Dict
@@ -398,14 +458,19 @@ class Config(BaseModel, _MutableMappingBase):
         /,
         with_schema: bool = True,
         indent: int | None = 4,
+        **kwargs: Unpack[DumpKwargs],
     ) -> str:
         """Dump configuration to a JSON string.
 
         Args:
             with_schema: Whether to include the schema reference in the JSON file
             indent: Number of spaces to use for indentation
+            kwargs: Additional keyword arguments to pass to the YAML dumper,
+                these are parameters directly passed to cls.model_dump_json().
         """
-        json_str = self.model_dump_json(indent=indent)
+        kwargs_with_defaults = _DEFAULT_JSON_DUMP_KWARGS.copy()
+        kwargs_with_defaults.update(kwargs)
+        json_str = self.model_dump_json(indent=indent, **kwargs_with_defaults)
 
         # Add schema reference if available and with_schema is True
         if with_schema and (schema_uri := _get_schema_uri(type(self))):
@@ -437,6 +502,7 @@ class Config(BaseModel, _MutableMappingBase):
         /,
         with_schema: bool = True,
         indent: int | None = 4,
+        **kwargs: Unpack[DumpKwargs],
     ) -> None:
         """Save configuration to a JSON file.
 
@@ -444,9 +510,12 @@ class Config(BaseModel, _MutableMappingBase):
             path: Path where the JSON file will be saved
             with_schema: Whether to include the schema reference in the JSON file
             indent: Number of spaces to use for indentation
+            kwargs: Additional keyword arguments to pass to the YAML dumper,
+                these are parameters directly passed to cls.model_dump_json().
         """
+        json_str = self.to_json_str(with_schema=with_schema, indent=indent, **kwargs)
         with open(path, "w", encoding="utf-8") as f:
-            f.write(self.to_json_str(with_schema=with_schema, indent=indent))
+            f.write(json_str)
 
     @classmethod
     def from_json_str(cls, json_str: str, /):
@@ -473,12 +542,20 @@ class Config(BaseModel, _MutableMappingBase):
         with open(path, "r", encoding="utf-8") as f:
             return cls.from_json_str(f.read())
 
-    def to_yaml_str(self, /, with_schema: bool = True, indent: int | None = 4) -> str:
+    def to_yaml_str(
+        self,
+        /,
+        with_schema: bool = True,
+        indent: int | None = 4,
+        **kwargs: Unpack[YamlDumpKwargs],
+    ) -> str:
         """Dump configuration to a YAML string.
 
         Args:
             with_schema: Whether to include the schema reference in the YAML string
             indent: Number of spaces to use for indentation
+            kwargs: Additional keyword arguments to pass to the YAML dumper,
+                these are parameters directly passed to cls.model_dump_json().
 
         Raises:
             ImportError: If pydantic-yaml is not installed
@@ -492,7 +569,10 @@ class Config(BaseModel, _MutableMappingBase):
                 "all extras using 'pip install nshconfig[extra]"
                 ", or install with 'pip install pydantic-yaml'"
             )
-        data_str = to_yaml_str(self, indent=indent)
+
+        kwargs_with_defaults = _DEFAULT_YAML_DUMP_KWARGS.copy()
+        kwargs_with_defaults.update(kwargs)
+        data_str = to_yaml_str(self, indent=indent, **kwargs_with_defaults)
 
         # Add YAML language server schema directive if with_schema is True
         if with_schema and (schema_uri := _get_schema_uri(type(self))):
@@ -506,6 +586,7 @@ class Config(BaseModel, _MutableMappingBase):
         /,
         with_schema: bool = True,
         indent: int | None = 4,
+        **kwargs: Unpack[YamlDumpKwargs],
     ) -> None:
         """Save configuration to a YAML file.
 
@@ -513,13 +594,17 @@ class Config(BaseModel, _MutableMappingBase):
             path: Path where the YAML file will be saved
             with_schema: Whether to include the schema reference in the YAML file
             indent: Number of spaces to use for indentation
+            kwargs: Additional keyword arguments to pass to the YAML dumper,
+                these are parameters directly passed to cls.model_dump_json().
 
         Raises:
             ImportError: If pydantic-yaml is not installed
         """
+        yaml_str = self.to_yaml_str(with_schema=with_schema, indent=indent, **kwargs)
+
         # Write the file
         with open(path, "w", encoding="utf-8") as f:
-            f.write(self.to_yaml_str(with_schema=with_schema, indent=indent))
+            f.write(yaml_str)
 
     @classmethod
     def from_yaml_str(cls, yaml_str: str, /):
