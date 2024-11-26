@@ -21,6 +21,8 @@ pyright = "*"
 ruff = "*"
 ipykernel = "*"
 ipywidgets = "*"
+pytest = "^8.3.3"
+pytest-cov = "^6.0.0"
 
 [build-system]
 requires = ["poetry-core"]
@@ -47,3 +49,8 @@ yaml = ["pydantic-yaml"]
 
 [tool.poetry.scripts]
 nshconfig-export = "nshconfig.bin.export:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "--cov=nshconfig --cov-report=term-missing"

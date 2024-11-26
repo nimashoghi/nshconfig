@@ -656,6 +656,106 @@ class Config(BaseModel, _MutableMappingBase):
 
         return parse_yaml_file_as(cls, path)
 
+    @classmethod
+    def from_python_file(cls, path: str | Path, /):
+        """Create configuration from a Python file.
+
+        The Python file should export a `__config__` variable that contains the configuration.
+        The configuration can be either a dictionary or an instance of the configuration class.
+
+        Args:
+            path: Path to the Python file
+
+        Returns:
+            A validated configuration instance
+
+        Raises:
+            ImportError: If the Python file cannot be imported
+            ValueError: If the Python file does not export a `__config__` variable
+        """
+        path = Path(path).resolve()
+        if not path.exists():
+            raise FileNotFoundError(f"Python file not found: {path}")
+
+        # Generate a unique module name to avoid conflicts
+        module_name = f"_nshconfig_dynamic_module_{hash(str(path))}"
+
+        # Import the module
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load Python file: {path}")
+
+        module = importlib.util.module_from_spec(spec)
+
+        # Add the module's directory to sys.path temporarily to handle relative imports
+        import sys
+        original_path = sys.path.copy()
+        try:
+            module_dir = str(path.parent)
+            if module_dir not in sys.path:
+                sys.path.insert(0, module_dir)
+
+            spec.loader.exec_module(module)
+        finally:
+            # Restore the original sys.path
+            sys.path[:] = original_path
+
+        # Get the __config__ variable
+        if not hasattr(module, "__config__"):
+            raise ValueError(
+                f"Python file {path} does not export a `__config__` variable"
+            )
+
+        config = module.__config__
+        if isinstance(config, dict):
+            return cls.from_dict(config)
+        elif isinstance(config, cls):
+            return config
+        else:
+            raise ValueError(
+                f"Python file {path} exports a `__config__` variable of type {type(config)}, "
+                f"but expected a dictionary or an instance of {cls.__name__}"
+            )
+
+    @classmethod
+    def from_python_module(cls, module_name: str, /):
+        """Create configuration from a Python module.
+
+        The Python module should export a `__config__` variable that contains the configuration.
+        The configuration can be either a dictionary or an instance of the configuration class.
+
+        Args:
+            module_name: Name of the Python module (e.g. "myapp.config")
+
+        Returns:
+            A validated configuration instance
+
+        Raises:
+            ImportError: If the Python module cannot be imported
+            ValueError: If the Python module does not export a `__config__` variable
+        """
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError as e:
+            raise ImportError(f"Could not import module {module_name}: {e}")
+
+        # Get the __config__ variable
+        if not hasattr(module, "__config__"):
+            raise ValueError(
+                f"Module {module_name} does not export a `__config__` variable"
+            )
+
+        config = module.__config__
+        if isinstance(config, dict):
+            return cls.from_dict(config)
+        elif isinstance(config, cls):
+            return config
+        else:
+            raise ValueError(
+                f"Module {module_name} exports a `__config__` variable of type {type(config)}, "
+                f"but expected a dictionary or an instance of {cls.__name__}"
+            )
+
     # endregion
 
 
