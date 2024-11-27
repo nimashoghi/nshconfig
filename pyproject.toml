@@ -15,6 +15,10 @@ pydantic-settings = "*"
 typing-inspect = "*"
 treescope = { version = "*", optional = true }
 pydantic-yaml = { version = "*", optional = true }
+sphinx = { version = "*", optional = true }
+sphinx-rtd-theme = { version = "*", optional = true }
+myst-parser = { version = "*", optional = true }
+sphinx-copybutton = { version = "*", optional = true }
 
 [tool.poetry.group.dev.dependencies]
 pyright = "*"
@@ -46,6 +50,7 @@ required-imports = ["from __future__ import annotations"]
 [tool.poetry.extras]
 extra = ["treescope", "pydantic-yaml"]
 yaml = ["pydantic-yaml"]
+docs = ["sphinx", "sphinx-rtd-theme", "myst-parser", "sphinx-copybutton"]
 
 [tool.poetry.scripts]
 nshconfig-export = "nshconfig.bin.export:main"
