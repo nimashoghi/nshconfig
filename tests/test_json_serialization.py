@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from .conftest import TestConfig
+from .conftest import SampleConfig
 
 
 def test_to_json_str(sample_config):
@@ -24,8 +24,8 @@ def test_to_json_str(sample_config):
 def test_from_json_str(sample_config):
     """Test creating config from JSON string."""
     json_str = json.dumps({"name": "test", "value": 42})
-    config = TestConfig.from_json_str(json_str)
-    assert isinstance(config, TestConfig)
+    config = SampleConfig.from_json_str(json_str)
+    assert isinstance(config, SampleConfig)
     assert config.name == "test"
     assert config.value == 42
 
@@ -40,7 +40,7 @@ def test_json_file_roundtrip(sample_config):
         sample_config.to_json_file(temp_path)
 
         # Load from file
-        loaded_config = TestConfig.from_json_file(temp_path)
+        loaded_config = SampleConfig.from_json_file(temp_path)
 
         # Verify
         assert loaded_config == sample_config
@@ -50,7 +50,7 @@ def test_json_file_roundtrip(sample_config):
 
 def test_json_schema_inclusion():
     """Test JSON serialization with schema inclusion."""
-    config = TestConfig(name="test", value=42)
+    config = SampleConfig(name="test", value=42)
 
     # Test with schema
     json_with_schema = config.to_json_str(with_schema=True)
@@ -66,7 +66,7 @@ def test_json_schema_inclusion():
 
 def test_json_indentation():
     """Test JSON indentation options."""
-    config = TestConfig(name="test", value=42)
+    config = SampleConfig(name="test", value=42)
 
     # Test with custom indent
     json_indented = config.to_json_str(indent=2)
@@ -80,10 +80,12 @@ def test_json_indentation():
 def test_from_json_str_invalid():
     """Test error handling for invalid JSON input."""
     with pytest.raises(ValidationError):
-        TestConfig.from_json_str('{"name": "test"}')  # missing required field
+        SampleConfig.from_json_str('{"name": "test"}')  # missing required field
 
     with pytest.raises(ValidationError):
-        TestConfig.from_json_str('{"name": "test", "value": "not_an_int"}')  # wrong type
+        SampleConfig.from_json_str(
+            '{"name": "test", "value": "not_an_int"}'
+        )  # wrong type
 
     with pytest.raises(ValidationError):
-        TestConfig.from_json_str('invalid json')
+        SampleConfig.from_json_str("invalid json")

@@ -5,8 +5,9 @@ import pytest
 from nshconfig import Config
 
 
-class TestConfig(Config):
+class SampleConfig(Config):
     """A simple test configuration class."""
+
     name: str
     value: int
 
@@ -15,15 +16,12 @@ class TestConfig(Config):
 
 
 @pytest.fixture
-def sample_config() -> TestConfig:
-    """Return a sample TestConfig instance for testing."""
-    return TestConfig(name="test", value=42)
+def sample_config() -> SampleConfig:
+    """Return a sample SampleConfig instance for testing."""
+    return SampleConfig(name="test", value=42)
 
 
 @pytest.fixture
 def sample_config_dict() -> dict:
     """Return a sample configuration dictionary for testing."""
-    return {
-        "name": "test",
-        "value": 42
-    }
+    return {"name": "test", "value": 42}

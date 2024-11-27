@@ -4,29 +4,13 @@ import importlib.util
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
-
-from typing_extensions import TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
     from .config import Config
 
 # Use string literal type annotation to avoid circular import
-T = TypeVar("T", bound="Config", infer_variance=True)
-
-
-@runtime_checkable
-class ConfigCallable(Protocol[T]):
-    """Protocol for callables that return a config."""
-
-    def __call__(self) -> T: ...
-
-
-@runtime_checkable
-class ConfigModule(Protocol[T]):
-    """Protocol for modules that export a config."""
-
-    __config__: T
+T = TypeVar("T", bound="Config")
 
 
 @contextmanager
@@ -65,15 +49,24 @@ def parse_config_from_module(module: Any, config_cls: type[T]) -> T:
     Raises:
         ValueError: If the module does not export a valid config
     """
+    # First check for callable config
+    if hasattr(module, "__create_config__"):
+        config = module.__create_config__()
+        if isinstance(config, dict):
+            return config_cls.from_dict(config)
+        elif isinstance(config, config_cls):
+            return config
+        else:
+            raise ValueError(
+                f"Module's __create_config__() returned type {type(config)}, "
+                f"but expected a dictionary or an instance of {config_cls.__name__}"
+            )
+
+    # Then check for static config
     if not hasattr(module, "__config__"):
-        raise ValueError(f"Module does not export a `__config__` variable")
+        raise ValueError(f"Module does not export `__config__` or `__create_config__`")
 
     config = module.__config__
-
-    # Handle callable config
-    if isinstance(config, ConfigCallable):
-        config = config()
-
     if isinstance(config, dict):
         return config_cls.from_dict(config)
     elif isinstance(config, config_cls):
@@ -81,7 +74,7 @@ def parse_config_from_module(module: Any, config_cls: type[T]) -> T:
     else:
         raise ValueError(
             f"Module exports a `__config__` variable of type {type(config)}, "
-            f"but expected a dictionary, callable returning config, or an instance of {config_cls.__name__}"
+            f"but expected a dictionary or an instance of {config_cls.__name__}"
         )
 
 

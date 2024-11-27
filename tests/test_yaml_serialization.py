@@ -8,13 +8,14 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
-from .conftest import TestConfig
+from .conftest import SampleConfig
 
 
 def requires_yaml(func):
     """Decorator to skip tests if pydantic-yaml is not installed."""
     try:
         import pydantic_yaml  # noqa
+
         return func
     except ImportError:
         return pytest.mark.skip(reason="pydantic-yaml not installed")(func)
@@ -32,7 +33,7 @@ def test_to_yaml_str(sample_config):
 @requires_yaml
 def test_yaml_schema_inclusion():
     """Test YAML serialization with schema inclusion."""
-    config = TestConfig(name="test", value=42)
+    config = SampleConfig(name="test", value=42)
 
     # Test with schema
     yaml_with_schema = config.to_yaml_str(with_schema=True)
@@ -54,7 +55,7 @@ def test_yaml_file_roundtrip(sample_config):
         sample_config.to_yaml_file(temp_path)
 
         # Load from file
-        loaded_config = TestConfig.from_yaml(temp_path)
+        loaded_config = SampleConfig.from_yaml(temp_path)
 
         # Verify
         assert loaded_config == sample_config
@@ -69,8 +70,8 @@ def test_from_yaml_str(sample_config):
     name: test
     value: 42
     """
-    config = TestConfig.from_yaml_str(yaml_str)
-    assert isinstance(config, TestConfig)
+    config = SampleConfig.from_yaml_str(yaml_str)
+    assert isinstance(config, SampleConfig)
     assert config.name == "test"
     assert config.value == 42
 
@@ -79,12 +80,12 @@ def test_from_yaml_str(sample_config):
 def test_from_yaml_str_invalid():
     """Test error handling for invalid YAML input."""
     with pytest.raises(ValidationError):
-        TestConfig.from_yaml_str("""
+        SampleConfig.from_yaml_str("""
         name: test
         """)  # missing required field
 
     with pytest.raises(ValidationError):
-        TestConfig.from_yaml_str("""
+        SampleConfig.from_yaml_str("""
         name: test
         value: not_an_int
         """)  # wrong type
@@ -93,17 +94,25 @@ def test_from_yaml_str_invalid():
 def test_yaml_not_installed():
     """Test error handling when pydantic-yaml is not installed."""
     # Mock the import to raise ImportError
-    with patch.dict(sys.modules, {'pydantic_yaml': None}):
-        config = TestConfig(name="test", value=42)
+    with patch.dict(sys.modules, {"pydantic_yaml": None}):
+        config = SampleConfig(name="test", value=42)
 
-        with pytest.raises(ImportError, match="Pydantic-yaml is required for YAML support"):
+        with pytest.raises(
+            ImportError, match="Pydantic-yaml is required for YAML support"
+        ):
             config.to_yaml_str()
 
-        with pytest.raises(ImportError, match="Pydantic-yaml is required for YAML support"):
+        with pytest.raises(
+            ImportError, match="Pydantic-yaml is required for YAML support"
+        ):
             config.to_yaml_file("test.yaml")
 
-        with pytest.raises(ImportError, match="Pydantic-yaml is required for YAML support"):
-            TestConfig.from_yaml_str("name: test\nvalue: 42")
+        with pytest.raises(
+            ImportError, match="Pydantic-yaml is required for YAML support"
+        ):
+            SampleConfig.from_yaml_str("name: test\nvalue: 42")
 
-        with pytest.raises(ImportError, match="Pydantic-yaml is required for YAML support"):
-            TestConfig.from_yaml("test.yaml")
+        with pytest.raises(
+            ImportError, match="Pydantic-yaml is required for YAML support"
+        ):
+            SampleConfig.from_yaml("test.yaml")
