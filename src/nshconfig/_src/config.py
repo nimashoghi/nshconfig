@@ -15,6 +15,7 @@ from typing_extensions import TypedDict, Unpack, override
 
 from .missing import MISSING as _MISSING
 from .missing import validate_no_missing_values
+from .utils import temporary_sys_path
 
 if TYPE_CHECKING:
     from ruamel.yaml import YAML
@@ -687,18 +688,9 @@ class Config(BaseModel, _MutableMappingBase):
 
         module = importlib.util.module_from_spec(spec)
 
-        # Add the module's directory to sys.path temporarily to handle relative imports
-        import sys
-        original_path = sys.path.copy()
-        try:
-            module_dir = str(path.parent)
-            if module_dir not in sys.path:
-                sys.path.insert(0, module_dir)
-
+        # Use context manager to handle sys.path modification
+        with temporary_sys_path(path.parent):
             spec.loader.exec_module(module)
-        finally:
-            # Restore the original sys.path
-            sys.path[:] = original_path
 
         # Get the __config__ variable
         if not hasattr(module, "__config__"):
