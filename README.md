@@ -11,6 +11,7 @@ Fully typed configuration management, powered by [Pydantic](https://github.com/p
         - [Motivation](#motivation-1)
         - [Usage Guide](#usage-guide)
     - [Configuration Formats](#configuration-formats)
+        - [Python File/Module Support](#python-filemodule-support)
         - [JSON Support](#json-support)
         - [YAML Support](#yaml-support)
         - [Dictionary Support](#dictionary-support)
