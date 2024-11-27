@@ -144,6 +144,12 @@ def export_main():
         action=argparse.BooleanOptionalAction,
         help="Generate JSON schema for config objects",
     )
+    parser.add_argument(
+        "--all",
+        action=argparse.BooleanOptionalAction,
+        help="Generate __all__ declarations in export files",
+        default=True,
+    )
     args = parser.parse_args()
 
     # Extract typed arguments
@@ -157,6 +163,7 @@ def export_main():
     export_generics: bool = args.export_generics
     generate_typed_dicts: bool = args.generate_typed_dicts
     generate_json_schema: bool = args.generate_json_schema
+    generate_all: bool = args.all
 
     # Set up logging
     level = logging.DEBUG if verbose else logging.INFO
@@ -214,6 +221,7 @@ def export_main():
         config_cls_dict,
         alias_dict,
         generate_typed_dicts,
+        generate_all=generate_all,
     )
 
     # Write some metadata so we can identify generated folders.
@@ -591,6 +599,8 @@ def _create_export_files(
     config_cls_dict: dict,
     alias_dict: dict,
     generate_typed_dicts: bool,
+    *,
+    generate_all: bool = True,
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -603,6 +613,7 @@ def _create_export_files(
         generate_typed_dicts,
         root=output_dir,
         root_module=base_module,
+        generate_all=generate_all,
     )
 
     # Create hierarchical export files
@@ -636,6 +647,7 @@ def _create_export_files(
                     generate_typed_dicts,
                     root=output_dir,
                     root_module=base_module,
+                    generate_all=generate_all,
                 )
 
     # Format files using ruff if available
@@ -652,11 +664,13 @@ def _create_export_file(
     *,
     root: Path,
     root_module: str,
+    generate_all: bool = True,
 ):
     export_lines = []
     class_names = {}  # To keep track of class names and their modules
     alias_names = {}  # To keep track of alias names and their modules
     submodule_exports = set()
+    all_exports = set() if generate_all else None  # Only track if generating __all__
 
     def _add_line(line: str):
         export_lines.append(line)
@@ -681,20 +695,28 @@ def _create_export_file(
                     class_names[class_name]
                 ):
                     class_names[class_name] = module
+                    if all_exports is not None:  # Only add if generating __all__
+                        all_exports.add(class_name)
 
             if module != module_name:
                 submodule = module[len(module_name) + 1 :].split(".")[0]
                 submodule_exports.add(submodule)
+                if all_exports is not None:  # Only add if generating __all__
+                    all_exports.add(submodule)
 
     for module, aliases in sorted(alias_dict.items()):
         if module == module_name or module.startswith(f"{module_name}."):
             for name in sorted(aliases.keys()):
                 if name not in alias_names or len(module) < len(alias_names[name]):
                     alias_names[name] = module
+                    if all_exports is not None:  # Only add if generating __all__
+                        all_exports.add(name)
 
             if module != module_name:
                 submodule = module[len(module_name) + 1 :].split(".")[0]
                 submodule_exports.add(submodule)
+                if all_exports is not None:  # Only add if generating __all__
+                    all_exports.add(submodule)
 
     # Direct imports of configs and aliases
     for class_name, module in sorted(class_names.items()):
@@ -720,6 +742,8 @@ def _create_export_file(
 
             for export in _typed_dict_file_exports(class_name):
                 _add_line(f"from .{export_module} import {export} as {export}")
+                if all_exports is not None:  # Only add if generating __all__
+                    all_exports.add(export)
 
         if class_names:
             _add_line("")
@@ -727,6 +751,14 @@ def _create_export_file(
     # Add submodule exports
     for submodule in sorted(submodule_exports):
         _add_line(f"from . import {submodule} as {submodule}")
+
+    # Add __all__ declaration after all imports only if enabled
+    if all_exports:  # This check now handles both None and empty set cases
+        _add_line("")
+        _add_line("__all__ = [")
+        for export in sorted(all_exports):
+            _add_line(f'    "{export}",')
+        _add_line("]")
 
     # Write export lines
     with file_path.open("w") as f:
