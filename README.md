@@ -126,6 +126,96 @@ Based on your code and its functionality, I'll write a new section for the READM
 
 nshconfig supports multiple formats for creating and serializing configurations, making it flexible for different use cases:
 
+#### Python File/Module Support
+
+nshconfig supports loading configurations directly from Python files and modules, offering a more dynamic way to create configurations:
+
+```python
+from mypackage import ModelConfig
+
+# Load from Python file
+config1 = ModelConfig.from_python_file("model_config.py")
+
+# Load from Python module
+config2 = ModelConfig.from_python_module("myapp.configs.model")
+```
+
+The Python file or module should export either:
+- A `__config__` variable containing the configuration
+- A `__create_config__` function that returns the configuration
+
+Let's assume that `mypackage` is a Python package with a `ModelConfig` configuration class with the following definition:
+
+```python
+# mypackage/__init__.py
+
+class ModelConfig(C.Config):
+    hidden_size: int
+    num_layers: int
+```
+
+Then you can load the configuration from the Python file like this:
+
+```python
+# model_config.py
+
+from mypackage import ModelConfig
+
+# Option 1: Using __config__ variable
+__config__ = ModelConfig(
+    hidden_size=256,
+    num_layers=4
+)
+
+# You can also return a dictionary instead of an instance:
+__config__ = {
+    "hidden_size": 256,
+    "num_layers": 4
+}
+
+# Option 2: Using __create_config__ function
+def __create_config__():
+    return ModelConfig(
+        hidden_size=256,
+        num_layers=4
+    )
+```
+
+You can also load multiple configurations from a single file using the list variants:
+
+```python
+# Load multiple configs from Python file
+configs = ModelConfig.from_python_file_list("model_configs.py")
+
+# Load multiple configs from Python module
+configs = ModelConfig.from_python_module_list("myapp.configs.models")
+```
+
+The Python file should export either:
+- A `__configs__` variable containing a list of configurations
+- A `__create_configs__` function that returns an iterable of configurations
+
+Example multi-configuration file:
+
+```python
+# model_configs.py
+
+from mypackage import ModelConfig
+
+# Option 1: Using __configs__ variable
+__configs__ = [
+    ModelConfig(hidden_size=256, num_layers=4),
+    ModelConfig(hidden_size=512, num_layers=8)
+]
+
+# Option 2: Using __create_configs__ function
+def __create_configs__():
+    yield ModelConfig(hidden_size=256, num_layers=4)
+    yield ModelConfig(hidden_size=512, num_layers=8)
+```
+
+The configurations can be provided either as instances of the configuration class or as dictionaries. This makes Python files/modules a flexible way to create configurations, especially when you need to compute values dynamically or reuse configuration components.
+
 #### JSON Support
 
 You can create and save configurations using JSON:
