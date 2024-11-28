@@ -186,6 +186,7 @@ def export_main():
             module_name,
             ignore_abc,
             export_generics,
+            module,
         ):
             logging.debug(f"Exporting {config_cls}")
             config_cls_dict[module_name].add(config_cls)
@@ -194,6 +195,7 @@ def export_main():
             module_name,
             ignore_abc,
             export_generics,
+            module,
         ):
             alias_dict[module_name][name] = obj
 
@@ -444,7 +446,7 @@ def _find_modules(module_name: str, recursive: bool, ignore_modules: list[str]):
 
     modules = []
     if not any(
-        module_name.startswith(ignore) for ignore in ignore_modules
+        _is_submodule(module_name, ignore) for ignore in ignore_modules
     ) and not _is_generated_module(module_name):
         modules.append(module_name)
     else:
@@ -495,9 +497,17 @@ def _unwrap_type_alias(obj: Any):
     return obj
 
 
-def _should_export(obj: Any, ignore_abc: bool, export_generics: bool):
+def _should_export(obj: Any, ignore_abc: bool, export_generics: bool, root_module: str):
     # If this is a `TypeAliasType`, resolve the actual type.
     obj = _unwrap_type_alias(obj)
+
+    # Check if the object's module starts with the root module
+    try:
+        obj_module = getattr(obj, "__module__", None)
+        if obj_module and not _is_submodule(obj_module, root_module):
+            return False
+    except (AttributeError, TypeError):
+        pass
 
     # First check for Export() metadata in the Annotated[] metadata
     def _has_export_metadata(obj: Any):
@@ -526,13 +536,14 @@ def _should_export(obj: Any, ignore_abc: bool, export_generics: bool):
             # If this is a `TypeAliasType`, resolve the actual type.
             obj = _unwrap_type_alias(obj)
 
-            # If this is a Config subclass, export it
+            # If this is a Config subclass, check its module and export it if appropriate
             if (
                 inspect.isclass(obj)
                 and issubclass(obj, Config)
                 and (not ignore_abc or not inspect.isabstract(obj))
             ):
-                return True
+                # Check if the class's module starts with root_module
+                return _is_submodule(obj.__module__, root_module)
 
             # If this an Annotated type, we need to check the inner type.
             if typing_inspect.get_origin(obj) is Annotated:
@@ -572,24 +583,28 @@ def _should_export(obj: Any, ignore_abc: bool, export_generics: bool):
     return False
 
 
-def _module_configs(module_name: str, ignore_abc: bool, export_generics: bool):
+def _module_configs(
+    module_name: str, ignore_abc: bool, export_generics: bool, root_module: str
+):
     # Import the module
     module = importlib.import_module(module_name)
 
     # Find all subclasses of Config
     for _, cls in inspect.getmembers(module, inspect.isclass):
-        if _should_export(cls, ignore_abc, export_generics):
+        if _should_export(cls, ignore_abc, export_generics, root_module):
             yield cls
 
 
-def _alias_configs(module_name: str, ignore_abc: bool, export_generics: bool):
+def _alias_configs(
+    module_name: str, ignore_abc: bool, export_generics: bool, root_module: str
+):
     # Import the module
     module = importlib.import_module(module_name)
 
     # Also export type aliases that have the Export()
     # in their Annotated[] metadata.
     for name, obj in inspect.getmembers(module):
-        if _should_export(obj, ignore_abc, export_generics):
+        if _should_export(obj, ignore_abc, export_generics, root_module):
             yield name, obj
 
 
@@ -688,7 +703,7 @@ def _create_export_file(
 
     # Collect Config classes, aliases, and submodules
     for module, config_classes in sorted(config_cls_dict.items()):
-        if module == module_name or module.startswith(f"{module_name}."):
+        if module == module_name or _is_submodule(module, module_name):
             for cls in sorted(config_classes, key=lambda c: c.__name__):
                 class_name = cls.__name__
                 if class_name not in class_names or len(module) < len(
@@ -705,7 +720,7 @@ def _create_export_file(
                     all_exports.add(submodule)
 
     for module, aliases in sorted(alias_dict.items()):
-        if module == module_name or module.startswith(f"{module_name}."):
+        if module == module_name or _is_submodule(module, module_name):
             for name in sorted(aliases.keys()):
                 if name not in alias_names or len(module) < len(alias_names[name]):
                     alias_names[name] = module
@@ -788,3 +803,36 @@ def _to_export_module(
     # Convert the path to a module name
     export_module = export_module.with_suffix("").as_posix().replace("/", ".")
     return export_module
+
+
+def _is_submodule(module: str, parent_module: str) -> bool:
+    """Check if a module is a submodule of another module.
+
+    Args:
+        module: The module to check
+        parent_module: The potential parent module
+
+    Returns:
+        True if module is a submodule of parent_module, False otherwise
+
+    Example:
+        >>> _is_submodule("mymodule.submodule", "mymodule")
+        True
+        >>> _is_submodule("mymodule", "mymodule")
+        True
+        >>> _is_submodule("mymodulea.submodule", "mymodule")
+        False
+    """
+    if module == parent_module:
+        return True
+
+    # Split both into parts
+    module_parts = module.split(".")
+    parent_parts = parent_module.split(".")
+
+    # Parent must be shorter
+    if len(parent_parts) > len(module_parts):
+        return False
+
+    # Check that all parent parts match exactly
+    return all(m == p for m, p in zip(module_parts, parent_parts))
