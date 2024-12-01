@@ -17,8 +17,8 @@ config2 = ModelConfig.from_python_module("myapp.configs.model")
 ```
 
 The Python file or module should export either:
-- A `__config__` variable containing the configuration
-- A `__create_config__` function that returns the configuration
+- A `__config__` variable containing an instance of the configuration class
+- A `__create_config__` function that returns an instance of the configuration class
 
 Example configuration file:
 
@@ -95,25 +95,6 @@ yaml_str = config1.to_yaml_str()
 
 # Save to YAML file
 config1.to_yaml_file("model_config.yaml")
-```
-
-## Dictionary Support
-
-You can also create configurations directly from Python dictionaries:
-
-```python
-class ModelConfig(C.Config):
-    hidden_size: int
-    num_layers: int
-
-# Create from dictionary
-config = ModelConfig.from_dict({
-    "hidden_size": 256,
-    "num_layers": 4
-})
-
-# Convert to dictionary
-config_dict = config.to_dict()
 ```
 
 ## Schema References

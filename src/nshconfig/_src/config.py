@@ -15,13 +15,7 @@ from typing_extensions import TypedDict, Unpack, override
 
 from .missing import MISSING as _MISSING
 from .missing import validate_no_missing_values
-from .utils import (
-    import_and_parse_configs_from_python_file,
-    import_and_parse_configs_from_python_module,
-    import_and_parse_python_file,
-    import_and_parse_python_module,
-    temporary_sys_path,
-)
+from .utils import import_and_parse_python_file, import_and_parse_python_module
 
 if TYPE_CHECKING:
     from ruamel.yaml import YAML
@@ -703,47 +697,6 @@ class Config(BaseModel, _MutableMappingBase):
             ValueError: If the Python module does not export a valid `__config__` variable
         """
         return import_and_parse_python_module(module_name, cls)
-
-    @classmethod
-    def from_python_file_list(cls, path: str | Path, /):
-        """Create multiple configurations from a Python file.
-
-        The Python file should export a `__configs__` variable that contains a list of configurations,
-        or a `__create_configs__` function that returns an iterable of configurations.
-        Each configuration can be either a dictionary or an instance of the configuration class.
-
-        Args:
-            path: Path to the Python file
-
-        Returns:
-            A list of validated configuration instances
-
-        Raises:
-            FileNotFoundError: If the Python file does not exist
-            ImportError: If the Python file cannot be imported
-            ValueError: If the Python file does not export valid configurations
-        """
-        return import_and_parse_configs_from_python_file(path, cls)
-
-    @classmethod
-    def from_python_module_list(cls, module_name: str, /):
-        """Create multiple configurations from a Python module.
-
-        The Python module should export a `__configs__` variable that contains a list of configurations,
-        or a `__create_configs__` function that returns an iterable of configurations.
-        Each configuration can be either a dictionary or an instance of the configuration class.
-
-        Args:
-            module_name: Name of the Python module (e.g. "myapp.config")
-
-        Returns:
-            A list of validated configuration instances
-
-        Raises:
-            ImportError: If the Python module cannot be imported
-            ValueError: If the Python module does not export valid configurations
-        """
-        return import_and_parse_configs_from_python_module(module_name, cls)
 
     # endregion
 
