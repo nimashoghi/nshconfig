@@ -12,9 +12,17 @@ features/index
 contributing
 ```
 
-## About nshconfig
+## Motivation
 
-As a machine learning researcher, I often found myself running numerous training jobs with various hyperparameters for the models I was working on. Keeping track of these parameters in a fully typed manner became increasingly important. While the excellent `pydantic` library provided most of the functionality I needed, I wanted to add a few extra features to streamline my workflow. This led to the creation of `nshconfig`.
+`nshconfig` extends Pydantic to provide enhanced configuration management features, particularly focused on:
+
+- Maintaining strongly typed configuration hierarchies
+- Supporting dynamic configuration systems and plugins
+- Streamlining parameter management for complex experiments
+- Providing better IDE support and type checking
+- Enabling clean integration with ML frameworks
+
+While Pydantic provides excellent core functionality for data validation, `nshconfig` adds specialized features for handling complex configuration scenarios and experimental workflows.
 
 ## Credit
 

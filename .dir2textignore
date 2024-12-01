@@ -1,0 +1,7 @@
+poetry.lock
+LICENSE
+.gitignore
+.dir2textignore
+.git/
+tests/
+notebooks/
