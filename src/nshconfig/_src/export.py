@@ -202,6 +202,7 @@ def export_main():
 
     # Just remove the output directory if remove_existing is True
     if remove_existing and output.exists():
+        logging.critical(f"Removing existing output directory {output}")
         if output.is_dir():
             shutil.rmtree(output)
         else:
