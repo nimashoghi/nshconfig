@@ -11,7 +11,6 @@ homepage = "https://github.com/nimashoghi/nshconfig"
 [tool.poetry.dependencies]
 python = "^3.10"
 pydantic = "*"
-pydantic-settings = "*"
 typing-inspect = "*"
 treescope = { version = "*", optional = true }
 pydantic-yaml = { version = "*", optional = true }
@@ -25,8 +24,8 @@ pyright = "*"
 ruff = "*"
 ipykernel = "*"
 ipywidgets = "*"
-pytest = "^8.3.3"
-pytest-cov = "^6.0.0"
+pytest = "*"
+pytest-cov = "*"
 
 [build-system]
 requires = ["poetry-core"]
