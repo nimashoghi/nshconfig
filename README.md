@@ -14,10 +14,13 @@ Fully typed configuration management, powered by [Pydantic](https://github.com/p
 pip install nshconfig
 ```
 
-For YAML support:
+To install all optional dependencies, use:
+
 ```bash
-pip install "nshconfig[yaml]"
+pip install nshconfig[extra]
 ```
+
+Please see the [Installation Guide](https://nima.sh/nshconfig/installation.html) for more details.
 
 ## Quick Start
 
