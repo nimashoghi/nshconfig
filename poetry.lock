@@ -2034,11 +2034,11 @@ files = [
 ]
 
 [extras]
-docs = ["myst-parser", "sphinx", "sphinx-copybutton", "sphinx-rtd-theme"]
+docs = []
 extra = ["pydantic-yaml", "treescope"]
 yaml = ["pydantic-yaml"]
 
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "b5c38b59be2c618b46ad85b6d46f8c4717c2efb46dc006bff0410e2c20aed915"
+content-hash = "08d5e46efe1d1d7bc4963b6deb64093ea4096bf197fc17cf8207c96412788d58"

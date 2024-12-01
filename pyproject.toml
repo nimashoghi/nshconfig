@@ -14,10 +14,6 @@ pydantic = "*"
 typing-inspect = "*"
 treescope = { version = "*", optional = true }
 pydantic-yaml = { version = "*", optional = true }
-sphinx = { version = "*", optional = true }
-sphinx-rtd-theme = { version = "*", optional = true }
-myst-parser = { version = "*", optional = true }
-sphinx-copybutton = { version = "*", optional = true }
 
 [tool.poetry.group.dev.dependencies]
 pyright = "*"
@@ -26,6 +22,10 @@ ipykernel = "*"
 ipywidgets = "*"
 pytest = "*"
 pytest-cov = "*"
+sphinx = { version = "*", optional = true }
+sphinx-rtd-theme = { version = "*", optional = true }
+myst-parser = { version = "*", optional = true }
+sphinx-copybutton = { version = "*", optional = true }
 
 [build-system]
 requires = ["poetry-core"]
