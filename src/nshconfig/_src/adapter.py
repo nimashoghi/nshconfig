@@ -94,9 +94,9 @@ class Adapter(Generic[T]):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.adapter = TypeAdapter[T](*args, **kwargs)
 
-    # Dict methods
-    def to_dict(self, instance: T, /, **kwargs: Unpack[DumpPythonParams]) -> Any:
-        """Convert data to a dictionary.
+    # Python methods
+    def to_python(self, instance: T, /, **kwargs: Unpack[DumpPythonParams]) -> Any:
+        """Convert data to a Python object.
 
         Args:
             instance: The instance to convert
@@ -104,17 +104,17 @@ class Adapter(Generic[T]):
                 dump_python method
 
         Returns:
-            Dictionary representation of the data
+            Python representation of the data
         """
         return self.adapter.dump_python(instance, **kwargs)
 
-    def from_dict(
+    def from_python(
         self,
-        data: dict[str, Any],
+        data: Any,
         /,
         **kwargs: Unpack[ValidatePythonParams],
     ) -> T:
-        """Create instance from a dictionary.
+        """Create instance from a Python object.
 
         Args:
             data: Dictionary containing data
