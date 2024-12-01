@@ -97,6 +97,52 @@ yaml_str = config1.to_yaml_str()
 config1.to_yaml_file("model_config.yaml")
 ```
 
+## Type-Safe Adapters
+
+For more fine-grained control over configuration conversion and validation, nshconfig provides a type-safe Adapter class that wraps Pydantic's [TypeAdapter](https://docs.pydantic.dev/latest/api/type_adapter/) functionality. While Config classes provide their own serialization methods, the Adapter class allows you to validate and serialize any type - including complex nested types and non-Config types:
+
+```python
+from nshconfig import Config
+from nshconfig.adapter import Adapter
+
+class ModelConfig(Config):
+    hidden_size: int
+    num_layers: int
+
+# Create adapters for different types
+model_adapter = Adapter(ModelConfig)
+tuple_adapter = Adapter(tuple[ModelConfig, int, str])
+dict_adapter = Adapter(dict[str, ModelConfig])
+
+# Validate and convert different data structures
+config = model_adapter.from_dict({
+    "hidden_size": 256,
+    "num_layers": 4
+})
+
+# Validate tuple of (ModelConfig, int, str)
+validated = tuple_adapter.from_dict([
+    {"hidden_size": 256, "num_layers": 4},
+    42,
+    "hello"
+])
+
+# Validate dictionary of ModelConfigs
+configs = dict_adapter.from_dict({
+    "model1": {"hidden_size": 256, "num_layers": 4},
+    "model2": {"hidden_size": 512, "num_layers": 8}
+})
+```
+
+The adapter provides type-safe conversion between different formats while maintaining all validation rules. This is particularly useful when you need to:
+- Load configuration files in different formats
+- Save configuration state to disk
+- Convert between different representations of your data while ensuring type safety
+- Validate external data against complex types
+- Work with collections of configurations
+
+Each conversion method accepts additional parameters to customize the serialization/deserialization process, such as excluding certain fields, handling defaults, or controlling validation strictness. See Pydantic's TypeAdapter documentation for more details on the underlying functionality.
+
 ## Schema References
 
 When saving to JSON or YAML, you can include schema references that enable better IDE support:

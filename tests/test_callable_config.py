@@ -121,46 +121,6 @@ def __create_config__():
     assert config.nested.inner_value == 400
 
 
-def test_callable_config_in_module(tmp_path):
-    # Create a temporary module file with a callable config
-    module_path = tmp_path / "test_config.py"
-    module_path.write_text("""
-def __create_config__():
-    from nshconfig import Config
-
-    class TestConfig(Config):
-        value: int = 42
-        name: str = "test"
-
-    config = TestConfig()
-    config.value = 100
-    config.name = "from_callable"
-    return config.model_dump()  # Return as dict to avoid class mismatch
-""")
-
-    # Test loading config from the module
-    config = SimpleConfig.from_python_file(module_path)
-    assert config.value == 100
-    assert config.name == "from_callable"
-
-
-def test_dict_returning_callable_in_module(tmp_path):
-    # Create a temporary module file with a callable that returns a dict
-    module_path = tmp_path / "test_config.py"
-    module_path.write_text("""
-def __create_config__():
-    return {
-        "value": 200,
-        "name": "from_dict"
-    }
-""")
-
-    # Test loading config from the module
-    config = SimpleConfig.from_python_file(module_path)
-    assert config.value == 200
-    assert config.name == "from_dict"
-
-
 def test_invalid_callable_config(tmp_path):
     # Create a temporary module file with an invalid callable config
     module_path = tmp_path / "test_config.py"
@@ -170,9 +130,7 @@ def __create_config__():
 """)
 
     # Test that loading fails with appropriate error
-    with pytest.raises(
-        ValueError, match="returned type <class 'int'>, but expected a dictionary"
-    ):
+    with pytest.raises(ValueError, match="Module exports a config of type"):
         SimpleConfig.from_python_file(module_path)
 
 
@@ -180,11 +138,10 @@ def test_callable_with_args_in_module(tmp_path):
     # Create a temporary module file with a callable that requires arguments
     module_path = tmp_path / "test_config.py"
     module_path.write_text("""
+from testpkg.configs import TestConfig
+
 def __create_config__(x):  # Invalid: requires an argument
-    return {
-        "value": x,
-        "name": "from_callable"
-    }
+    return TestConfig(value=x, name="from_callable")
 """)
 
     # Test that loading fails with appropriate error
@@ -192,53 +149,17 @@ def __create_config__(x):  # Invalid: requires an argument
         SimpleConfig.from_python_file(module_path)
 
 
-def test_nested_config_from_callable(tmp_path):
-    # Create a temporary module file with nested config structure
-    module_path = tmp_path / "test_config.py"
-    module_path.write_text("""
-def __create_config__():
-    from nshconfig import Config
-
-    class NestedConfig(Config):
-        inner_value: int = 0
-
-    class OuterConfig(Config):
-        value: int = 42
-        name: str = "test"
-        nested: NestedConfig = NestedConfig()
-
-    config = OuterConfig()
-    config.value = 300
-    config.nested.inner_value = 400
-    return config.model_dump()  # Return as dict to avoid class mismatch
-""")
-
-    # Define the config classes to match the module
-    class NestedConfig(Config):
-        inner_value: int = 0
-
-    class OuterConfig(Config):
-        value: int = 42
-        name: str = "test"
-        nested: NestedConfig = NestedConfig()
-
-    # Test loading nested config from the module
-    config = OuterConfig.from_python_file(module_path)
-    assert config.value == 300
-    assert config.nested.inner_value == 400
-
-
 def test_static_config_in_module(tmp_path):
     # Create a temporary module file with a static config
     module_path = tmp_path / "test_config.py"
     module_path.write_text("""
-__config__ = {
-    "value": 300,
-    "name": "from_static"
-}
+from testpkg.configs import TestConfig
+
+__config__ = TestConfig(value=300, name="from_static")
 """)
+    from testpkg.configs import TestConfig  # type: ignore
 
     # Test loading config from the module
-    config = SimpleConfig.from_python_file(module_path)
+    config = TestConfig.from_python_file(module_path)
     assert config.value == 300
     assert config.name == "from_static"

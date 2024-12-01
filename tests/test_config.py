@@ -15,30 +15,6 @@ class SampleConfig(Config):
     value: int
 
 
-def test_from_python_file_with_dict():
-    # Create a temporary Python file with a dictionary config
-    with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
-        f.write(
-            dedent("""
-            __config__ = {
-                "name": "test",
-                "value": 42
-            }
-        """)
-        )
-        temp_path = f.name
-
-    try:
-        # Load and validate the config
-        config = SampleConfig.from_python_file(temp_path)
-        assert isinstance(config, SampleConfig)
-        assert config.name == "test"
-        assert config.value == 42
-    finally:
-        # Clean up
-        os.unlink(temp_path)
-
-
 def test_from_python_file_with_instance():
     # Create a temporary Python file with a config instance
     with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
@@ -83,12 +59,14 @@ def test_from_python_file_with_relative_import():
         with open(config_path, "w") as f:
             f.write(
                 dedent("""
+                from tests.test_config import SampleConfig
+
                 from helper import TEST_NAME, TEST_VALUE
 
-                __config__ = {
-                    "name": TEST_NAME,
-                    "value": TEST_VALUE
-                }
+                __config__ = SampleConfig(
+                    name=TEST_NAME,
+                    value=TEST_VALUE
+                )
             """)
             )
 
@@ -124,7 +102,7 @@ def test_from_python_file_invalid_type():
 
     try:
         # Attempt to load the config
-        with pytest.raises(ValueError, match="exports a `__config__` variable of type"):
+        with pytest.raises(ValueError, match="Module exports a config of type"):
             SampleConfig.from_python_file(temp_path)
     finally:
         # Clean up

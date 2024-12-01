@@ -15,7 +15,6 @@ from typing_extensions import TypedDict, Unpack, override
 
 from .missing import MISSING as _MISSING
 from .missing import validate_no_missing_values
-from .utils import import_and_parse_python_file, import_and_parse_python_module
 
 if TYPE_CHECKING:
     from ruamel.yaml import YAML
@@ -663,7 +662,6 @@ class Config(BaseModel, _MutableMappingBase):
 
         The Python file should export a `__config__` variable that contains the configuration,
         or a `__create_config__` function that returns a configuration.
-        The configuration can be either a dictionary or an instance of the configuration class.
 
         Args:
             path: Path to the Python file
@@ -676,6 +674,8 @@ class Config(BaseModel, _MutableMappingBase):
             ImportError: If the Python file cannot be imported
             ValueError: If the Python file does not export a valid `__config__` variable
         """
+        from .utils import import_and_parse_python_file
+
         return import_and_parse_python_file(path, cls)
 
     @classmethod
@@ -684,7 +684,6 @@ class Config(BaseModel, _MutableMappingBase):
 
         The Python module should export a `__config__` variable that contains the configuration,
         or a `__create_config__` function that returns a configuration.
-        The configuration can be either a dictionary or an instance of the configuration class.
 
         Args:
             module_name: Name of the Python module (e.g. "myapp.config")
@@ -696,6 +695,8 @@ class Config(BaseModel, _MutableMappingBase):
             ImportError: If the Python module cannot be imported
             ValueError: If the Python module does not export a valid `__config__` variable
         """
+        from .utils import import_and_parse_python_module
+
         return import_and_parse_python_module(module_name, cls)
 
     # endregion

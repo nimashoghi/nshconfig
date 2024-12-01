@@ -91,6 +91,31 @@ def import_python_module(module_name: str) -> Any:
     return module
 
 
+def extract_config_from_module(module: Any) -> Any:
+    """Extract a config from a module.
+
+    Args:
+        module: The module to extract the config from
+
+    Returns:
+        The extractd config
+
+    Raises:
+        ValueError: If the module does not have a `__config__` or `__create_config__` export
+    """
+    # First check for callable config
+    if hasattr(module, "__create_config__"):
+        config = module.__create_config__()
+        return config
+
+    # Then check for static config
+    if not hasattr(module, "__config__"):
+        raise ValueError(f"Module does not export `__config__` or `__create_config__`")
+
+    config = module.__config__
+    return config
+
+
 def parse_config_from_module(module: Any, config_cls: type[T]) -> T:
     """Parse a config from a module.
 
@@ -104,29 +129,14 @@ def parse_config_from_module(module: Any, config_cls: type[T]) -> T:
     Raises:
         ValueError: If the module does not export a valid config
     """
-    # First check for callable config
-    if hasattr(module, "__create_config__"):
-        config = module.__create_config__()
-        if isinstance(config, config_cls):
-            return config
-        else:
-            raise ValueError(
-                f"Module's __create_config__() returned type {type(config)}, "
-                f"but expected an instance of {config_cls.__name__}"
-            )
-
-    # Then check for static config
-    if not hasattr(module, "__config__"):
-        raise ValueError(f"Module does not export `__config__` or `__create_config__`")
-
-    config = module.__config__
-    if isinstance(config, config_cls):
-        return config
-    else:
+    config = extract_config_from_module(module)
+    if not isinstance(config, config_cls):
         raise ValueError(
-            f"Module exports a `__config__` variable of type {type(config)}, "
+            f"Module exports a config of type {type(config)}, "
             f"but expected an instance of {config_cls.__name__}"
         )
+
+    return config
 
 
 def import_and_parse_python_file(path: str | Path, config_cls: type[T]) -> T:
