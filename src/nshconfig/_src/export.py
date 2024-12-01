@@ -100,6 +100,7 @@ def export_main():
     )
     parser.add_argument(
         "--remove-existing",
+        "--rm",
         action=argparse.BooleanOptionalAction,
         help="Remove existing export files before exporting",
         default=True,
