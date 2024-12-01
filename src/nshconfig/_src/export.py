@@ -308,13 +308,12 @@ def _typed_dict_name_for_config_cls_name(class_name: str) -> str:
     return f"{class_name}TypedDict"
 
 
-def _typed_dict_file_exports(class_name: str) -> Iterable[str]:
+def _typed_dict_file_exports(class_name: str) -> list[str]:
     """
-    Returns the exports for the typed dict file.
+    Returns the exports for the typed dict file in a deterministic order.
     """
     typed_dict_name = _typed_dict_name_for_config_cls_name(class_name)
-    yield f"{typed_dict_name}"
-    yield f"Create{class_name}"
+    return sorted([typed_dict_name, f"Create{class_name}"])
 
 
 def _config_cls_to_typed_dict_code(config_cls: type[Config]) -> str:
@@ -406,8 +405,8 @@ def _generate_json_schema(
     mapping: dict[str, Path] = {}
 
     # Create JSON schema files
-    for module_name, config_classes in config_cls_dict.items():
-        for config_cls in config_classes:
+    for module_name, config_classes in sorted(config_cls_dict.items()):
+        for config_cls in sorted(config_classes, key=lambda c: c.__name__):
             # Get the relative path from the module name
             if module_name == output_dir.name:
                 relative_path = Path()
@@ -420,15 +419,37 @@ def _generate_json_schema(
 
             # Convert the config cls to a JSON schema
             schema = config_cls.model_json_schema()
+            # Sort schema properties recursively
+            schema = _sort_json_schema(schema)
 
             # Write the JSON schema to a file
             output_file = output_path / f"{config_cls.__name__}.schema.json"
             with output_file.open("w") as f:
-                f.write(json.dumps(schema, indent=4))
+                f.write(json.dumps(schema, indent=4, sort_keys=True))
 
             mapping[_class_fullname(config_cls)] = output_file
 
     return mapping
+
+
+def _sort_json_schema(schema: dict) -> dict:
+    """
+    Sort JSON schema properties recursively.
+    """
+    result = {}
+    # Process keys in sorted order
+    for key in sorted(schema.keys()):
+        value = schema[key]
+        if isinstance(value, dict):
+            result[key] = _sort_json_schema(value)
+        elif isinstance(value, list):
+            result[key] = [
+                _sort_json_schema(item) if isinstance(item, dict) else item
+                for item in value
+            ]
+        else:
+            result[key] = value
+    return result
 
 
 def _is_generated_module(module_name: str) -> bool:
