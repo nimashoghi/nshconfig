@@ -301,7 +301,7 @@ import typing_extensions as typ
             if def_description:
                 result += f'"""{def_description}"""\n'
             result += (
-                f'{def_pascal} = typ.TypeAliasType("{def_pascal}", "{inner.inline}")\n'
+                f'{def_pascal} = typ.TypeAliasType("{def_pascal}", {inner.inline})\n'
             )
 
     result += "\n\n# Schema entries\n"
