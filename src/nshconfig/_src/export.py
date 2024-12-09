@@ -171,6 +171,14 @@ def export_main():
     logging.basicConfig(level=level)
     logging.debug(f"Arguments: {args}")
 
+    # Just remove the output directory if remove_existing is True
+    if remove_existing and output.exists():
+        logging.critical(f"Removing existing output directory {output}")
+        if output.is_dir():
+            shutil.rmtree(output)
+        else:
+            output.unlink()
+
     # Find all modules to export
     modules: list[str] = _find_modules(module, recursive, ignore_module)
 
@@ -199,14 +207,6 @@ def export_main():
             module,
         ):
             alias_dict[module_name][name] = obj
-
-    # Just remove the output directory if remove_existing is True
-    if remove_existing and output.exists():
-        logging.critical(f"Removing existing output directory {output}")
-        if output.is_dir():
-            shutil.rmtree(output)
-        else:
-            output.unlink()
 
     # If `generate_typed_dicts`, we need to generate TypedDicts for the config objects.
     typed_dict_mapping: dict[str, Path] | None = None
