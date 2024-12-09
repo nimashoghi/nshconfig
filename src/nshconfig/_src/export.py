@@ -267,7 +267,7 @@ def _run_ruff(file_path: Path):
                 "ruff",
                 "check",
                 "--silent",
-                "--select",
+                "--extend-select",
                 "I",
                 "--fix",
                 str(file_path.absolute()),
