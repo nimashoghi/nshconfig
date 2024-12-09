@@ -195,7 +195,10 @@ def _convert_enum(entry_name: str, enum_values: list) -> CodeResult:
     literals = []
     for value in enum_values:
         if isinstance(value, str):
-            literals.append(f'typ.Literal["{value}"]')
+            if '"' in value:
+                literals.append(f"typ.Literal['{value}']")
+            else:
+                literals.append(f'typ.Literal["{value}"]')
         elif isinstance(value, bool):
             literals.append(
                 f"typ.Literal[{str(value).capitalize()}]"
