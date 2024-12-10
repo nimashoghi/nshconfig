@@ -140,6 +140,12 @@ def export_main():
         help="Generate TypedDicts for config objects",
     )
     parser.add_argument(
+        "-iod",
+        "--generate-instance-or-dict",
+        action=argparse.BooleanOptionalAction,
+        help="Generate InstanceOrDict unions for config objects",
+    )
+    parser.add_argument(
         "-js",
         "--generate-json-schema",
         action=argparse.BooleanOptionalAction,
@@ -163,6 +169,7 @@ def export_main():
     ignore_abc: bool = args.ignore_abc
     export_generics: bool = args.export_generics
     generate_typed_dicts: bool = args.generate_typed_dicts
+    generate_instance_or_dict: bool = args.generate_instance_or_dict
     generate_json_schema: bool = args.generate_json_schema
     generate_all: bool = args.all
 
@@ -225,6 +232,7 @@ def export_main():
         config_cls_dict,
         alias_dict,
         generate_typed_dicts,
+        generate_instance_or_dict,
         generate_all=generate_all,
     )
 
@@ -290,16 +298,24 @@ if typ.TYPE_CHECKING:
 
 TYPED_CREATOR_TEMPLATE = """\
 @typ.overload
-def Create{ConfigClassName}(dict: {TypedDictName}, /) -> {ConfigClassName}: ...
+def Create{ConfigClassName}(**dict: typ.Unpack[{TypedDictName}]) -> {ConfigClassName}: ...
 
 @typ.overload
-def Create{ConfigClassName}(**dict: typ.Unpack[{TypedDictName}]) -> {ConfigClassName}: ...
+def Create{ConfigClassName}(data: {TypedDictName} | {ConfigClassName}, /) -> {ConfigClassName}: ...
 
 def Create{ConfigClassName}(*args, **kwargs):
     from {ConfigModule} import {ConfigClassName}
 
-    dict = args[0] if args else kwargs
-    return {ConfigClassName}.model_validate(dict)
+    if not args and kwargs:
+        # Called with keyword arguments
+        return {ConfigClassName}.from_dict(kwargs)
+    elif len(args) == 1:
+        return {ConfigClassName}.from_dict_or_instance(args[0])
+    else:
+        raise TypeError(
+            f"Create{ConfigClassName} accepts either a {TypedDictName}, "
+            f"keyword arguments, or a {ConfigClassName} instance"
+        )
 """
 
 
@@ -637,6 +653,7 @@ def _create_export_files(
     config_cls_dict: dict,
     alias_dict: dict,
     generate_typed_dicts: bool,
+    generate_instance_or_dict: bool,
     *,
     generate_all: bool = True,
 ):
@@ -649,6 +666,7 @@ def _create_export_files(
         config_cls_dict,
         alias_dict,
         generate_typed_dicts,
+        generate_instance_or_dict,
         root=output_dir,
         root_module=base_module,
         generate_all=generate_all,
@@ -683,6 +701,7 @@ def _create_export_files(
                     config_cls_dict,
                     alias_dict,
                     generate_typed_dicts,
+                    generate_instance_or_dict,
                     root=output_dir,
                     root_module=base_module,
                     generate_all=generate_all,
@@ -692,12 +711,27 @@ def _create_export_files(
     _run_ruff(output_dir)
 
 
+def _instance_or_dict_name_for_config_cls_name(class_name: str) -> str:
+    """Returns the name of the InstanceOrDict type for the given Config subclass."""
+    return f"{class_name}InstanceOrDict"
+
+
+def _create_instance_or_dict_code(class_name: str) -> str:
+    """Generates the InstanceOrDict union type code."""
+    typed_dict_name = _typed_dict_name_for_config_cls_name(class_name)
+    instance_or_dict_name = _instance_or_dict_name_for_config_cls_name(class_name)
+    return f"""\
+{instance_or_dict_name} = {class_name} | {typed_dict_name}
+"""
+
+
 def _create_export_file(
     file_path: Path,
     module_name: str,
     config_cls_dict: dict,
     alias_dict: dict,
     generate_typed_dicts: bool,
+    generate_instance_or_dict: bool,
     ignore_autoformat: bool = False,
     *,
     root: Path,
@@ -782,6 +816,15 @@ def _create_export_file(
                 _add_line(f"from .{export_module} import {export} as {export}")
                 if all_exports is not None:  # Only add if generating __all__
                     all_exports.add(export)
+
+            # Add InstanceOrDict type if both flags are enabled
+            if generate_instance_or_dict:
+                instance_or_dict_name = _instance_or_dict_name_for_config_cls_name(
+                    class_name
+                )
+                _add_line(_create_instance_or_dict_code(class_name))
+                if all_exports is not None:
+                    all_exports.add(instance_or_dict_name)
 
         if class_names:
             _add_line("")
