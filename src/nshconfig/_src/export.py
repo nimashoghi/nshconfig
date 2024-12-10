@@ -23,7 +23,7 @@ from .json_schema import convert_schema
 
 CODEGEN_MARKER = "__codegen__ = True"
 
-is_exporting = True
+is_exporting = False
 
 
 @dataclass(frozen=True)
