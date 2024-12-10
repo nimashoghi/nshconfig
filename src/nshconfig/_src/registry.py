@@ -183,7 +183,7 @@ class Registry(Generic[TConfig]):
                 (e.cls for e in self._elements if e.tag == tag), None
             )
         ) is not None and registered_by_tag != cls:
-            match self.config.get("duplicate_tag_policy", "error"):
+            match policy := self.config.get("duplicate_tag_policy", "error"):
                 case "warn-and-ignore":
                     log.warning(
                         f"Tag `{tag}` is already registered by {registered_by_tag}. Ignoring {cls}."

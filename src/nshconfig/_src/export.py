@@ -20,6 +20,7 @@ from typing_extensions import TypeAliasType
 
 from .config import Config
 from .json_schema import convert_schema
+from .registry import Registry
 
 CODEGEN_MARKER = "__codegen__ = True"
 
@@ -198,6 +199,7 @@ def export_main():
         # For each module, import it, find all subclasses of Config and export them
         config_cls_dict = defaultdict[str, set[type[Any]]](lambda: set[type[Any]]())
         alias_dict = defaultdict[str, dict[str, Any]](dict)
+        registry_dict = defaultdict[str, set[str]](set)
         for module_name in modules:
             if _is_generated_module(module_name):
                 logging.debug(f"Skipping generated module {module_name}")
@@ -221,6 +223,10 @@ def export_main():
             ):
                 alias_dict[module_name][name] = obj
 
+            # Collect registry instances
+            for name, registry in _module_registries(module_name, root_module=module):
+                registry_dict[module_name].add(name)
+
         # If `generate_typed_dicts`, we need to generate TypedDicts for the config objects.
         typed_dict_mapping: dict[str, Path] | None = None
         if generate_typed_dicts:
@@ -237,6 +243,7 @@ def export_main():
             module,
             config_cls_dict,
             alias_dict,
+            registry_dict,  # Pass registry_dict
             generate_typed_dicts,
             generate_instance_or_dict,
             generate_all=generate_all,
@@ -658,11 +665,21 @@ def _alias_configs(
             yield name, obj
 
 
+def _module_registries(module_name: str, root_module: str):
+    # Import the module
+    module = importlib.import_module(module_name)
+    # Collect registry instances
+    for name, obj in vars(module).items():
+        if isinstance(obj, Registry):
+            yield name, obj
+
+
 def _create_export_files(
     output_dir: Path,
     base_module: str,
     config_cls_dict: dict,
     alias_dict: dict,
+    registry_dict: dict,  # Add registry_dict
     generate_typed_dicts: bool,
     generate_instance_or_dict: bool,
     *,
@@ -676,6 +693,7 @@ def _create_export_files(
         base_module,
         config_cls_dict,
         alias_dict,
+        registry_dict,  # Pass registry_dict
         generate_typed_dicts,
         generate_instance_or_dict,
         root=output_dir,
@@ -711,6 +729,7 @@ def _create_export_files(
                     current_module,
                     config_cls_dict,
                     alias_dict,
+                    registry_dict,  # Pass registry_dict
                     generate_typed_dicts,
                     generate_instance_or_dict,
                     root=output_dir,
@@ -741,6 +760,7 @@ def _create_export_file(
     module_name: str,
     config_cls_dict: dict,
     alias_dict: dict,
+    registry_dict: dict,  # Add registry_dict
     generate_typed_dicts: bool,
     generate_instance_or_dict: bool,
     ignore_autoformat: bool = False,
@@ -752,6 +772,7 @@ def _create_export_file(
     export_lines = []
     class_names = {}  # To keep track of class names and their modules
     alias_names = {}  # To keep track of alias names and their modules
+    registry_names = {}  # Track registry names and their modules
     submodule_exports = set()
     all_exports = set() if generate_all else None  # Only track if generating __all__
 
@@ -801,6 +822,22 @@ def _create_export_file(
                 if all_exports is not None:  # Only add if generating __all__
                     all_exports.add(submodule)
 
+    # Collect registry instances
+    for module, registries in sorted(registry_dict.items()):
+        if module == module_name or _is_submodule(module, module_name):
+            for name in sorted(registries):
+                if name not in registry_names or len(module) < len(
+                    registry_names[name]
+                ):
+                    registry_names[name] = module
+                    if all_exports is not None:
+                        all_exports.add(name)
+            if module != module_name:
+                submodule = module[len(module_name) + 1 :].split(".")[0]
+                submodule_exports.add(submodule)
+                if all_exports is not None:
+                    all_exports.add(submodule)
+
     # Direct imports of configs and aliases
     for class_name, module in sorted(class_names.items()):
         _add_line(f"from {module} import {class_name} as {class_name}")
@@ -809,6 +846,12 @@ def _create_export_file(
 
     for alias_name, module in sorted(alias_names.items()):
         _add_line(f"from {module} import {alias_name} as {alias_name}")
+
+    _add_line("")
+
+    # Direct imports of registries
+    for registry_name, module in sorted(registry_names.items()):
+        _add_line(f"from {module} import {registry_name} as {registry_name}")
 
     _add_line("")
 
