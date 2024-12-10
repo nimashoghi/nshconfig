@@ -8,6 +8,7 @@ import json
 import logging
 import shutil
 import subprocess
+import typing
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -544,17 +545,14 @@ def _unwrap_type_alias(obj: Any):
     return obj
 
 
-def _should_export(obj: Any, ignore_abc: bool, export_generics: bool, root_module: str):
+def _should_export(
+    obj: Any,
+    ignore_abc: bool,
+    export_generics: bool,
+    root_module: str,
+):
     # If this is a `TypeAliasType`, resolve the actual type.
     obj = _unwrap_type_alias(obj)
-
-    # Check if the object's module starts with the root module
-    try:
-        obj_module = getattr(obj, "__module__", None)
-        if obj_module and not _is_submodule(obj_module, root_module):
-            return False
-    except (AttributeError, TypeError):
-        pass
 
     # First check for Export() metadata in the Annotated[] metadata
     def _has_export_metadata(obj: Any):
@@ -593,9 +591,9 @@ def _should_export(obj: Any, ignore_abc: bool, export_generics: bool, root_modul
                 return _is_submodule(obj.__module__, root_module)
 
             # If this an Annotated type, we need to check the inner type.
-            if typing_inspect.get_origin(obj) is Annotated:
+            if typing.get_origin(obj) is Annotated:
                 return _is_config_type(
-                    typing_inspect.get_args(obj)[0], ignore_abc, export_generics
+                    typing.get_args(obj)[0], ignore_abc, export_generics
                 )
 
             # If this is a Union of Config types, recursively check each type, and
@@ -651,7 +649,12 @@ def _alias_configs(
     # Also export type aliases that have the Export()
     # in their Annotated[] metadata.
     for name, obj in inspect.getmembers(module):
-        if _should_export(obj, ignore_abc, export_generics, root_module):
+        if _should_export(
+            obj,
+            ignore_abc,
+            export_generics,
+            root_module,
+        ):
             yield name, obj
 
 
