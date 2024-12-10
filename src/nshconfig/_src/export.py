@@ -22,6 +22,8 @@ from .json_schema import convert_schema
 
 CODEGEN_MARKER = "__codegen__ = True"
 
+is_exporting = True
+
 
 @dataclass(frozen=True)
 class Export:
@@ -83,182 +85,188 @@ def find_config_metadata(cls: type) -> tuple[str | None, str | None] | None:
 
 
 def export_main():
-    parser = argparse.ArgumentParser(
-        description="Export the configurations in a given module"
-    )
-    parser.add_argument(
-        "module",
-        type=str,
-        help="The module to export the configurations from",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        type=Path,
-        help="The output directory to write the configurations to",
-        required=True,
-    )
-    parser.add_argument(
-        "--remove-existing",
-        "--rm",
-        action=argparse.BooleanOptionalAction,
-        help="Remove existing export files before exporting",
-        default=True,
-    )
-    parser.add_argument(
-        "--recursive",
-        action=argparse.BooleanOptionalAction,
-        help="Recursively export configurations from all submodules",
-        default=True,
-    )
-    parser.add_argument(
-        "--verbose",
-        action=argparse.BooleanOptionalAction,
-        help="Enable verbose logging",
-    )
-    parser.add_argument(
-        "--ignore-module",
-        action="append",
-        help="Ignore the given module",
-        default=[],
-        type=str,
-    )
-    parser.add_argument(
-        "--ignore-abc",
-        action=argparse.BooleanOptionalAction,
-        help="Ignore Abstract Base Classes",
-    )
-    parser.add_argument(
-        "--export-generics",
-        action=argparse.BooleanOptionalAction,
-        help="Export generic types",
-    )
-    parser.add_argument(
-        "-td",
-        "--generate-typed-dicts",
-        action=argparse.BooleanOptionalAction,
-        help="Generate TypedDicts for config objects",
-    )
-    parser.add_argument(
-        "-iod",
-        "--generate-instance-or-dict",
-        action=argparse.BooleanOptionalAction,
-        help="Generate InstanceOrDict unions for config objects",
-    )
-    parser.add_argument(
-        "-js",
-        "--generate-json-schema",
-        action=argparse.BooleanOptionalAction,
-        help="Generate JSON schema for config objects",
-    )
-    parser.add_argument(
-        "--all",
-        action=argparse.BooleanOptionalAction,
-        help="Generate __all__ declarations in export files",
-        default=True,
-    )
-    args = parser.parse_args()
-
-    # Extract typed arguments
-    module: str = args.module
-    output: Path = args.output
-    remove_existing: bool = args.remove_existing
-    recursive: bool = args.recursive
-    verbose: bool = args.verbose
-    ignore_module: list[str] = args.ignore_module
-    ignore_abc: bool = args.ignore_abc
-    export_generics: bool = args.export_generics
-    generate_typed_dicts: bool = args.generate_typed_dicts
-    generate_instance_or_dict: bool = args.generate_instance_or_dict
-    generate_json_schema: bool = args.generate_json_schema
-    generate_all: bool = args.all
-
-    # Set up logging
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(level=level)
-    logging.debug(f"Arguments: {args}")
-
-    # Just remove the output directory if remove_existing is True
-    if remove_existing and output.exists():
-        logging.critical(f"Removing existing output directory {output}")
-        if output.is_dir():
-            shutil.rmtree(output)
-        else:
-            output.unlink()
-
-    # Find all modules to export
-    modules: list[str] = _find_modules(module, recursive, ignore_module)
-
-    # For each module, import it, find all subclasses of Config and export them
-    config_cls_dict = defaultdict[str, set[type[Any]]](lambda: set[type[Any]]())
-    alias_dict = defaultdict[str, dict[str, Any]](dict)
-    for module_name in modules:
-        if _is_generated_module(module_name):
-            logging.debug(f"Skipping generated module {module_name}")
-            continue
-
-        logging.debug(f"Exporting configurations from {module_name}")
-        for config_cls in _module_configs(
-            module_name,
-            ignore_abc,
-            export_generics,
-            module,
-        ):
-            logging.debug(f"Exporting {config_cls}")
-            config_cls_dict[module_name].add(config_cls)
-
-        for name, obj in _alias_configs(
-            module_name,
-            ignore_abc,
-            export_generics,
-            module,
-        ):
-            alias_dict[module_name][name] = obj
-
-    # If `generate_typed_dicts`, we need to generate TypedDicts for the config objects.
-    typed_dict_mapping: dict[str, Path] | None = None
-    if generate_typed_dicts:
-        typed_dict_mapping = _generate_typed_dicts(config_cls_dict, output)
-
-    # If `generate_json_schema`, we need to generate JSON schema for the config objects.
-    json_schema_mapping: dict[str, Path] | None = None
-    if generate_json_schema:
-        json_schema_mapping = _generate_json_schema(config_cls_dict, output)
-
-    # Create export files
-    _create_export_files(
-        output,
-        module,
-        config_cls_dict,
-        alias_dict,
-        generate_typed_dicts,
-        generate_instance_or_dict,
-        generate_all=generate_all,
-    )
-
-    # Write some metadata so we can identify generated folders.
-    with (output.parent / ".nshconfig.generated.json").open("w") as f:
-        # Write the generated module and the output directory
-        json.dump(
-            {
-                "module": module,
-                "output": str(output.relative_to(output.parent)),
-                "typed_dicts": {
-                    k: str(v.relative_to(output.parent))
-                    for k, v in typed_dict_mapping.items()
-                }
-                if typed_dict_mapping
-                else None,
-                "json_schemas": {
-                    k: str(v.relative_to(output.parent))
-                    for k, v in json_schema_mapping.items()
-                }
-                if json_schema_mapping
-                else None,
-            },
-            f,
-            indent=4,
+    global is_exporting
+    is_exporting = True
+    try:
+        parser = argparse.ArgumentParser(
+            description="Export the configurations in a given module"
         )
+        parser.add_argument(
+            "module",
+            type=str,
+            help="The module to export the configurations from",
+        )
+        parser.add_argument(
+            "-o",
+            "--output",
+            type=Path,
+            help="The output directory to write the configurations to",
+            required=True,
+        )
+        parser.add_argument(
+            "--remove-existing",
+            "--rm",
+            action=argparse.BooleanOptionalAction,
+            help="Remove existing export files before exporting",
+            default=True,
+        )
+        parser.add_argument(
+            "--recursive",
+            action=argparse.BooleanOptionalAction,
+            help="Recursively export configurations from all submodules",
+            default=True,
+        )
+        parser.add_argument(
+            "--verbose",
+            action=argparse.BooleanOptionalAction,
+            help="Enable verbose logging",
+        )
+        parser.add_argument(
+            "--ignore-module",
+            action="append",
+            help="Ignore the given module",
+            default=[],
+            type=str,
+        )
+        parser.add_argument(
+            "--ignore-abc",
+            action=argparse.BooleanOptionalAction,
+            help="Ignore Abstract Base Classes",
+        )
+        parser.add_argument(
+            "--export-generics",
+            action=argparse.BooleanOptionalAction,
+            help="Export generic types",
+        )
+        parser.add_argument(
+            "-td",
+            "--generate-typed-dicts",
+            action=argparse.BooleanOptionalAction,
+            help="Generate TypedDicts for config objects",
+        )
+        parser.add_argument(
+            "-iod",
+            "--generate-instance-or-dict",
+            action=argparse.BooleanOptionalAction,
+            help="Generate InstanceOrDict unions for config objects",
+        )
+        parser.add_argument(
+            "-js",
+            "--generate-json-schema",
+            action=argparse.BooleanOptionalAction,
+            help="Generate JSON schema for config objects",
+        )
+        parser.add_argument(
+            "--all",
+            action=argparse.BooleanOptionalAction,
+            help="Generate __all__ declarations in export files",
+            default=True,
+        )
+        args = parser.parse_args()
+
+        # Extract typed arguments
+        module: str = args.module
+        output: Path = args.output
+        remove_existing: bool = args.remove_existing
+        recursive: bool = args.recursive
+        verbose: bool = args.verbose
+        ignore_module: list[str] = args.ignore_module
+        ignore_abc: bool = args.ignore_abc
+        export_generics: bool = args.export_generics
+        generate_typed_dicts: bool = args.generate_typed_dicts
+        generate_instance_or_dict: bool = args.generate_instance_or_dict
+        generate_json_schema: bool = args.generate_json_schema
+        generate_all: bool = args.all
+
+        # Set up logging
+        level = logging.DEBUG if verbose else logging.INFO
+        logging.basicConfig(level=level)
+        logging.debug(f"Arguments: {args}")
+
+        # Just remove the output directory if remove_existing is True
+        if remove_existing and output.exists():
+            logging.critical(f"Removing existing output directory {output}")
+            if output.is_dir():
+                shutil.rmtree(output)
+            else:
+                output.unlink()
+
+        # Find all modules to export
+        modules: list[str] = _find_modules(module, recursive, ignore_module)
+
+        # For each module, import it, find all subclasses of Config and export them
+        config_cls_dict = defaultdict[str, set[type[Any]]](lambda: set[type[Any]]())
+        alias_dict = defaultdict[str, dict[str, Any]](dict)
+        for module_name in modules:
+            if _is_generated_module(module_name):
+                logging.debug(f"Skipping generated module {module_name}")
+                continue
+
+            logging.debug(f"Exporting configurations from {module_name}")
+            for config_cls in _module_configs(
+                module_name,
+                ignore_abc,
+                export_generics,
+                module,
+            ):
+                logging.debug(f"Exporting {config_cls}")
+                config_cls_dict[module_name].add(config_cls)
+
+            for name, obj in _alias_configs(
+                module_name,
+                ignore_abc,
+                export_generics,
+                module,
+            ):
+                alias_dict[module_name][name] = obj
+
+        # If `generate_typed_dicts`, we need to generate TypedDicts for the config objects.
+        typed_dict_mapping: dict[str, Path] | None = None
+        if generate_typed_dicts:
+            typed_dict_mapping = _generate_typed_dicts(config_cls_dict, output)
+
+        # If `generate_json_schema`, we need to generate JSON schema for the config objects.
+        json_schema_mapping: dict[str, Path] | None = None
+        if generate_json_schema:
+            json_schema_mapping = _generate_json_schema(config_cls_dict, output)
+
+        # Create export files
+        _create_export_files(
+            output,
+            module,
+            config_cls_dict,
+            alias_dict,
+            generate_typed_dicts,
+            generate_instance_or_dict,
+            generate_all=generate_all,
+        )
+
+        # Write some metadata so we can identify generated folders.
+        with (output.parent / ".nshconfig.generated.json").open("w") as f:
+            # Write the generated module and the output directory
+            json.dump(
+                {
+                    "module": module,
+                    "output": str(output.relative_to(output.parent)),
+                    "typed_dicts": {
+                        k: str(v.relative_to(output.parent))
+                        for k, v in typed_dict_mapping.items()
+                    }
+                    if typed_dict_mapping
+                    else None,
+                    "json_schemas": {
+                        k: str(v.relative_to(output.parent))
+                        for k, v in json_schema_mapping.items()
+                    }
+                    if json_schema_mapping
+                    else None,
+                },
+                f,
+                indent=4,
+            )
+
+    finally:
+        is_exporting = False
 
 
 def _run_ruff(file_path: Path):

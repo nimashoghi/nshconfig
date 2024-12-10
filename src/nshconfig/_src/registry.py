@@ -316,12 +316,15 @@ class Registry(Generic[TConfig]):
             ValueError: If no types are registered
         """
 
+        # If we're exporting, just treat this as the same as the base class
+        from .export import is_exporting
+
+        if is_exporting:
+            return self.base_cls.__pydantic_core_schema__
+
         # Make sure at least one element is registered
         if not self._elements:
-            raise ValueError(
-                "No elements registered in the registry. "
-                "Please register at least one element."
-            )
+            return core_schema.invalid_schema(ref=self.base_cls.__name__)
 
         # Construct the choices for the union schema
         choices: dict[str, core_schema.CoreSchema] = {}
@@ -331,6 +334,7 @@ class Registry(Generic[TConfig]):
         return core_schema.tagged_union_schema(
             choices,
             discriminator=self.discriminator,
+            ref=self.base_cls.__name__,
         )
 
     def type_adapter(self):
@@ -456,6 +460,8 @@ class Registry(Generic[TConfig]):
         registry = self
 
         class _RegistryTypeAnnotation:
+            __nshconfig_dynamic_resolution__ = True
+
             @classmethod
             def __get_pydantic_core_schema__(
                 cls,
