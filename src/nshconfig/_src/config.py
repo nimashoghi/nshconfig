@@ -22,10 +22,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-_MutableMappingBase = MutableMapping[str, Any]
-if TYPE_CHECKING:
-    _MutableMappingBase = object
-
 
 _DraftConfigContextSentinel = object()
 
@@ -90,12 +86,9 @@ _DEFAULT_YAML_DUMP_KWARGS: YamlDumpKwargs = {
 }
 
 
-class Config(BaseModel, _MutableMappingBase):
+class Config(BaseModel):
     """
     A base configuration class that provides validation and serialization capabilities.
-
-    This class extends Pydantic's BaseModel and implements a mutable mapping interface. It supports draft configurations
-    for flexible initialization and provides various serialization methods.
     """
 
     _is_draft_config: bool = PrivateAttr(default=False)
@@ -322,72 +315,6 @@ class Config(BaseModel, _MutableMappingBase):
                 continue
 
             # Otherwise, we can skip this field.
-
-    # region MutableMapping implementation
-    if not TYPE_CHECKING:
-        # This is mainly so the config can be used with lightning's hparams
-        #   transparently and without any issues.
-
-        @property
-        def _nshconfig_dict(self):
-            return self.model_dump()
-
-        # We need to make sure every config class
-        #   is a MutableMapping[str, Any] so that it can be used
-        #   with lightning's hparams.
-        @override
-        def __getitem__(self, key: str):
-            # Key can be of the format "a.b.c"
-            #   so we need to split it into a list of keys.
-            [first_key, *rest_keys] = key.split(".")
-            value = self._nshconfig_dict[first_key]
-
-            for key in rest_keys:
-                if isinstance(value, Mapping):
-                    value = value[key]
-                else:
-                    value = getattr(value, key)
-
-            return value
-
-        @override
-        def __setitem__(self, key: str, value: Any):
-            # Key can be of the format "a.b.c"
-            #   so we need to split it into a list of keys.
-            [first_key, *rest_keys] = key.split(".")
-            if len(rest_keys) == 0:
-                self._nshconfig_dict[first_key] = value
-                return
-
-            # We need to traverse the keys until we reach the last key
-            #   and then set the value
-            current_value = self._nshconfig_dict[first_key]
-            for key in rest_keys[:-1]:
-                if isinstance(current_value, Mapping):
-                    current_value = current_value[key]
-                else:
-                    current_value = getattr(current_value, key)
-
-            # Set the value
-            if isinstance(current_value, MutableMapping):
-                current_value[rest_keys[-1]] = value
-            else:
-                setattr(current_value, rest_keys[-1], value)
-
-        @override
-        def __delitem__(self, key: str):
-            # This is unsupported for this class
-            raise NotImplementedError
-
-        @override
-        def __iter__(self):
-            return iter(self._nshconfig_dict)
-
-        @override
-        def __len__(self):
-            return len(self._nshconfig_dict)
-
-    # endregion
 
     # region `treescope` integration
     def __treescope_repr__(self, path, subtree_renderer):

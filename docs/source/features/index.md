@@ -18,4 +18,3 @@ lightning_integration
 - [Dynamic Type Registry](type_registry.md): Build extensible, plugin-based systems
 - [Configuration Codegen](config_codegen.md): Generate type-safe interfaces and schemas
 - [MISSING Constant](missing_constant.md): Better handling of optional fields
-- [PyTorch Lightning Integration](lightning_integration.md): Seamless integration with PyTorch Lightning
