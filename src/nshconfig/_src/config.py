@@ -422,7 +422,10 @@ class Config(BaseModel, _MutableMappingBase):
     @model_serializer(mode="wrap")
     def include_literals(self, next_serializer):
         """Include fields with the `Literal` annotation in the dumped data,
-        even if `exclude_defaults` is `True`."""
+        even if `exclude_defaults` is `True`.
+
+        See https://github.com/pydantic/pydantic/discussions/9108#discussioncomment-8926452
+        for the original implementation."""
         dumped = next_serializer(self)
         for name, field_info in self.model_fields.items():
             if get_origin(field_info.annotation) == Literal:
