@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, get_origin
 from pydantic import BaseModel, PrivateAttr, model_serializer
 from pydantic import ConfigDict as _ConfigDict
 from pydantic.main import IncEx
-from typing_extensions import TypedDict, Unpack, override
+from typing_extensions import Self, TypedDict, Unpack, override
 
 from .missing import MISSING as _MISSING
 from .missing import validate_no_missing_values
@@ -442,6 +442,25 @@ class Config(BaseModel, _MutableMappingBase):
             A validated configuration instance
         """
         return cls.model_validate(config_dict)
+
+    @classmethod
+    def from_dict_or_instance(cls, data: Mapping[str, Any] | Self):
+        """Create configuration from a dictionary or an instance.
+
+        Args:
+            data: Dictionary containing configuration values or an instance of the config
+
+        Returns:
+            A validated configuration instance
+        """
+        if isinstance(data, cls):
+            return data
+        elif isinstance(data, Mapping):
+            return cls.from_dict(dict(data))
+        else:
+            raise TypeError(
+                "data must be a dictionary or an instance of the config class"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert configuration to a dictionary.
