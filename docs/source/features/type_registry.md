@@ -40,7 +40,6 @@ class CatConfig(AnimalConfig):
         return "Meow!"
 
 # Create a config that uses the registry
-@animal_registry.rebuild_on_registers
 class ProgramConfig(C.Config):
     animal: Annotated[AnimalConfig, animal_registry.DynamicResolution()]
 

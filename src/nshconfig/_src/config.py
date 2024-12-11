@@ -139,8 +139,40 @@ class Config(BaseModel, _MutableMappingBase):
 
     if TYPE_CHECKING:
 
-        def __init_subclass__(cls, **kwargs: Unpack[ConfigDict]):
+        @override
+        def __init_subclass__(cls, **kwargs: Unpack[ConfigDict]) -> None:
             super().__init_subclass__(**kwargs)
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs) -> None:
+        super().__pydantic_init_subclass__(**kwargs)
+
+        from .registry import Registry, extract_registries_from_field_info
+
+        log.debug(f"__pydantic_init_subclass__: {cls}")
+
+        # Look through fields for registry annotations including nested types
+        registries: list[Registry] = []
+        registry_ids: set[int] = set()
+        for name, field in cls.model_fields.items():
+            if not (found_registries := extract_registries_from_field_info(field)):
+                continue
+
+            for registry in found_registries:
+                if (id_ := id(registry)) in registry_ids:
+                    continue
+
+                log.debug(f"__pydantic_init_subclass__@{cls} - {name}: {registry}")
+                registries.append(registry)
+                registry_ids.add(id_)
+
+        # Register rebuild callback with each registry found
+        def _cb(_: Any):
+            cls.model_rebuild(force=True, raise_errors=False)
+            log.info(f"Rebuilt {cls} schema due to registry changes.")
+
+        for registry in registries:
+            registry._on_register_callbacks.append(_cb)
 
     def __draft_pre_init__(self):
         """Called right before a draft config is finalized."""

@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any, Generic, Literal, TypedDict, TypeVar, cast
 
 from pydantic import GetCoreSchemaHandler
+from pydantic.fields import FieldInfo
 from pydantic_core import core_schema
 from typing_extensions import assert_never
 
@@ -56,9 +57,18 @@ class RegistryConfig(TypedDict, total=False):
             - "warn-and-ignore": Warns about duplicates but keeps the original tag
             - "warn-and-replace": Warns about duplicates and replaces with new tag
             - "error": Raises an error when duplicate tags are found
+
+        auto_rebuild (bool):
+            If True, the registry will automatically rebuild Pydantic models
+            that use the DynamicResolution type annotation whenever a new class
+            is registered. This ensures that the model schema is always up-to-date
+            with the registered classes. If False, the user must manually wrap
+            parent pydantic models with the `@registry.rebuild_on_registers` decorator
+            to achieve the same behavior. Default is True.
     """
 
     duplicate_tag_policy: Literal["warn-and-ignore", "warn-and-replace", "error"]
+    auto_rebuild: bool
 
 
 @dataclasses.dataclass
@@ -301,6 +311,7 @@ class Registry(Generic[TConfig]):
 
         def _rebuild(_: type[Config]):
             cls.model_rebuild(force=True, raise_errors=False)
+            log.info(f"Rebuilt {cls} schema due to registry changes.")
 
         self._on_register_callbacks.append(_rebuild)
         _rebuild(cls)
@@ -326,11 +337,17 @@ class Registry(Generic[TConfig]):
         if not self._elements:
             return core_schema.invalid_schema(ref=self.base_cls.__name__)
 
+        if True:
+            return self.type_adapter().core_schema
+
         # Construct the choices for the union schema
         choices: dict[str, core_schema.CoreSchema] = {}
         for e in self._elements:
             cls = cast(type[Config], e.cls)
             choices[e.tag] = cls.__pydantic_core_schema__
+        log.debug(
+            f"Generated schema for {self.base_cls} with {len(choices)} choices. Choices: {choices.keys()}"
+        )
         return core_schema.tagged_union_schema(
             choices,
             discriminator=self.discriminator,
@@ -461,6 +478,7 @@ class Registry(Generic[TConfig]):
 
         class _RegistryTypeAnnotation:
             __nshconfig_dynamic_resolution__ = True
+            __nshconfig_registry__ = registry
 
             @classmethod
             def __get_pydantic_core_schema__(
@@ -468,10 +486,86 @@ class Registry(Generic[TConfig]):
                 source_type: Any,
                 handler: GetCoreSchemaHandler,
             ) -> core_schema.CoreSchema:
-                nonlocal registry
-                return registry.pydantic_schema()
+                return cls.__nshconfig_registry__.pydantic_schema()
 
         return _RegistryTypeAnnotation
+
+
+def _recursively_find_registry_annotations(typ: Any) -> list[Registry]:
+    """Recursively find all registry annotations in a type, including in nested types.
+
+    For example, this will find registry annotations in:
+    - Annotated[T, registry.DynamicResolution()]
+    - list[Annotated[T, registry.DynamicResolution()]]
+    - Dict[str, Annotated[T, registry.DynamicResolution()]]
+    - etc.
+
+    Args:
+        typ: The type to check
+
+    Returns:
+        List of found registry instances
+    """
+    registries = []
+
+    # Handle Annotated types
+    if typing.get_origin(typ) is typing.Annotated:
+        # Check annotations
+        (base_type, *annotations) = typing.get_args(typ)
+        for annotation in annotations:
+            if (registry := _extract_registry_from_annotation(annotation)) is not None:
+                registries.append(registry)
+
+        # Recurse into base type
+        registries.extend(_recursively_find_registry_annotations(base_type))
+
+    # Handle generic types (list, dict, etc)
+    elif origin := typing.get_origin(typ):
+        for arg in typing.get_args(typ):
+            registries.extend(_recursively_find_registry_annotations(arg))
+
+    return registries
+
+
+def _extract_registry_from_annotation(annotation: Any):
+    if not hasattr(annotation, "__nshconfig_dynamic_resolution__"):
+        return None
+
+    assert isinstance(
+        registry := annotation.__nshconfig_registry__, Registry
+    ), f"{registry} is not a Registry"
+
+    # If auto_rebuild is enabled, add the registry to the list
+    if not registry.config.get("auto_rebuild", True):
+        return None
+
+    return registry
+
+
+def extract_registries_from_field_info(field: FieldInfo):
+    """Extract all registries from a Pydantic FieldInfo object.
+
+    This function will extract all registries from the field's type and any nested types.
+
+    Args:
+        field: The field to extract registries from
+
+    Returns:
+        List of found registry instances
+    """
+    registries: list[Registry] = []
+
+    # Pydantic parses the first level of annotations, so we need to use those.
+    registries.extend(
+        registry
+        for metadata in field.metadata
+        if (registry := _extract_registry_from_annotation(metadata)) is not None
+    )
+
+    # Recursively find registry annotations
+    registries.extend(_recursively_find_registry_annotations(field.annotation))
+
+    return registries
 
 
 @dataclasses.dataclass(frozen=True)
