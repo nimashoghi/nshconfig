@@ -337,22 +337,7 @@ class Registry(Generic[TConfig]):
         if not self._elements:
             return core_schema.invalid_schema(ref=self.base_cls.__name__)
 
-        if True:
-            return self.type_adapter().core_schema
-
-        # Construct the choices for the union schema
-        choices: dict[str, core_schema.CoreSchema] = {}
-        for e in self._elements:
-            cls = cast(type[Config], e.cls)
-            choices[e.tag] = cls.__pydantic_core_schema__
-        log.debug(
-            f"Generated schema for {self.base_cls} with {len(choices)} choices. Choices: {choices.keys()}"
-        )
-        return core_schema.tagged_union_schema(
-            choices,
-            discriminator=self.discriminator,
-            ref=self.base_cls.__name__,
-        )
+        return self.type_adapter().core_schema
 
     def type_adapter(self):
         """Create a TypeAdapter for validating against the registry's types.
