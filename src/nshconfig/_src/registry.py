@@ -19,6 +19,18 @@ TConfig = TypeVar("TConfig", bound=Config, covariant=True)
 TClass = TypeVar("TClass", bound=type[Config])
 
 
+@dataclasses.dataclass(frozen=True)
+class _RegistryEntry:
+    tag: str
+    cls: type[Config]
+
+
+def _unwrap_annotated_recurive(typ: Any):
+    while typing.get_origin(typ) is typing.Annotated:
+        typ = typing.get_args(typ)[0]
+    return typ
+
+
 def _resolve_tag(cls: type[Config], discriminator_field_name: str) -> str:
     # Make sure cls has the discriminator attribute
     if (discriminator_field := cls.model_fields.get(discriminator_field_name)) is None:
@@ -150,7 +162,10 @@ class Registry(Generic[TConfig]):
     _: dataclasses.KW_ONLY
     discriminator: str
     config: RegistryConfig = dataclasses.field(
-        default_factory=lambda: {"duplicate_tag_policy": "error"}
+        default_factory=lambda: {
+            "duplicate_tag_policy": "error",
+            "auto_rebuild": True,
+        }
     )
     _elements: list[_RegistryEntry] = dataclasses.field(default_factory=lambda: [])
     _on_register_callbacks: list[Callable[[type[Config]], None]] = dataclasses.field(
@@ -525,12 +540,13 @@ def _recursively_find_registry_annotations(typ: Any) -> list[Registry]:
 
 
 def _extract_registry_from_annotation(annotation: Any):
-    if not hasattr(annotation, "__nshconfig_dynamic_resolution__"):
+    if (
+        not hasattr(annotation, "__nshconfig_dynamic_resolution__")
+        or (registry := getattr(annotation, "__nshconfig_registry__", None)) is None
+    ):
         return None
 
-    assert isinstance(
-        registry := annotation.__nshconfig_registry__, Registry
-    ), f"{registry} is not a Registry"
+    assert isinstance(registry, Registry), f"{registry} is not a Registry"
 
     # If auto_rebuild is enabled, add the registry to the list
     if not registry.config.get("auto_rebuild", True):
@@ -563,15 +579,3 @@ def extract_registries_from_field_info(field: FieldInfo):
     registries.extend(_recursively_find_registry_annotations(field.annotation))
 
     return registries
-
-
-@dataclasses.dataclass(frozen=True)
-class _RegistryEntry:
-    tag: str
-    cls: type[Config]
-
-
-def _unwrap_annotated_recurive(typ: Any):
-    while typing.get_origin(typ) is typing.Annotated:
-        typ = typing.get_args(typ)[0]
-    return typ
