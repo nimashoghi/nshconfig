@@ -342,11 +342,21 @@ class Registry(Generic[TConfig]):
             ValueError: If no types are registered
         """
 
-        # If we're exporting, just treat this as the same as the base class
+        # If we're exporting, all we can check for is that the base class is of
+        # the correct type.
         from .export import is_exporting
 
         if is_exporting:
-            return self.base_cls.__pydantic_core_schema__
+            return core_schema.json_or_python_schema(
+                json_schema=core_schema.any_schema(
+                    ref=f"{self.base_cls.__name__}_json"
+                ),
+                python_schema=core_schema.is_instance_schema(
+                    self.base_cls,
+                    ref=f"{self.base_cls.__name__}_python",
+                ),
+                ref=self.base_cls.__name__,
+            )
 
         # Make sure at least one element is registered
         if not self._elements:
