@@ -764,20 +764,26 @@ def _get_schema_uri(cls: type[Config]) -> str | None:
 
     from .export import find_config_metadata
 
-    if metadata := find_config_metadata(cls):
-        _, schema_path = metadata
-        if schema_path is not None:
-            # Get the absolute path by looking up from the metadata file location
-            if (
-                spec := importlib.util.find_spec(cls.__module__)
-            ) is None or spec.origin is None:
-                return None
-            module_dir = Path(spec.origin).parent
-            # Look up until we find the .nshconfig.generated.json file
-            current_dir = module_dir
-            while current_dir.parent != current_dir:
-                if (current_dir / ".nshconfig.generated.json").exists():
-                    file_path = str((current_dir / schema_path).resolve().absolute())
-                    return f"file://{file_path}"
-                current_dir = current_dir.parent
+    if not (metadata := find_config_metadata(cls)):
+        return None
+
+    _, schema_path = metadata
+    if schema_path is None:
+        return None
+
+    # Get the absolute path by looking up from the metadata file location
+    if (
+        spec := importlib.util.find_spec(cls.__module__)
+    ) is None or spec.origin is None:
+        return None
+
+    module_dir = Path(spec.origin).parent
+    # Look up until we find the .nshconfig.generated.json file
+    current_dir = module_dir
+    while current_dir.parent != current_dir:
+        if (current_dir / ".nshconfig.generated.json").exists():
+            file_path = str((current_dir / schema_path).resolve().absolute())
+            return f"file://{file_path}"
+        current_dir = current_dir.parent
+
     return None

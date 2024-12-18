@@ -34,11 +34,7 @@ def validate_no_missing_values(model: BaseModel):
     for name, field in model.model_fields.items():
         # If the field doesn't have the `AllowMissing` annotation, ignore it.
         #   (i.e., just let Pydantic do its thing).
-        allow_missing_annotation = next(
-            (m for m in field.metadata if isinstance(m, AllowMissingAnnotation)),
-            None,
-        )
-        if allow_missing_annotation is None:
+        if not any(isinstance(m, AllowMissingAnnotation) for m in field.metadata):
             continue
 
         # By this point, the field **should** have some value.
