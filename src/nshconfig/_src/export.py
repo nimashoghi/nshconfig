@@ -679,7 +679,7 @@ def _create_export_files(
     base_module: str,
     config_cls_dict: dict,
     alias_dict: dict,
-    registry_dict: dict,  # Add registry_dict
+    registry_dict: dict,
     generate_typed_dicts: bool,
     generate_instance_or_dict: bool,
     *,
@@ -693,13 +693,18 @@ def _create_export_files(
         base_module,
         config_cls_dict,
         alias_dict,
-        registry_dict,  # Pass registry_dict
+        registry_dict,
         generate_typed_dicts,
         generate_instance_or_dict,
         root=output_dir,
         root_module=base_module,
         generate_all=generate_all,
     )
+
+    # Create .gitattributes to mark files as generated
+    gitattributes_content = "* linguist-generated=true\n"
+    with open(output_dir / ".gitattributes", "w") as f:
+        f.write(gitattributes_content)
 
     # Create hierarchical export files
     all_modules = set(config_cls_dict.keys()) | set(alias_dict.keys())
@@ -819,7 +824,7 @@ def _create_export_file(
             if module != module_name:
                 submodule = module[len(module_name) + 1 :].split(".")[0]
                 submodule_exports.add(submodule)
-                if all_exports is not None:  # Only add if generating __all__
+                if all_exports is not None:
                     all_exports.add(submodule)
 
     # Collect registry instances
