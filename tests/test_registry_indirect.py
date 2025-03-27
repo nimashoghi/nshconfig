@@ -18,6 +18,7 @@ def test_manual_rebuild_fail():
         PropBase, discriminator="type", config={"auto_rebuild": False}
     )
 
+    @registry.rebuild_on_registers
     class Root(C.Config):
         a: int = 1
         my_prop: list[Annotated[PropBase, registry.DynamicResolution()]]
@@ -31,7 +32,6 @@ def test_manual_rebuild_fail():
 
     Root(my_prop=[Prop1()]).model_dump()
 
-    @registry.register
     class Prop2(PropBase):
         type: Literal["prop2"] = "prop2"
 
