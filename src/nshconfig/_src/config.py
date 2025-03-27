@@ -193,10 +193,6 @@ class Config(BaseModel, _MutableMappingBase):
         config_dict = self.model_dump(round_trip=True)
         config = self.model_validate(config_dict, strict=strict)
 
-        # Make sure that this is not a draft config
-        if config._is_draft_config:
-            raise ValueError("Draft configs are not valid. Call `finalize` first.")
-
         return config
 
     @classmethod
