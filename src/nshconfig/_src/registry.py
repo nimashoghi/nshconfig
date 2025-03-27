@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import typing
+from abc import ABC
 from collections.abc import Callable
 from typing import Any, Generic, Literal, TypedDict, TypeVar, cast
 
@@ -29,6 +30,10 @@ def _unwrap_annotated_recurive(typ: Any):
     while typing.get_origin(typ) is typing.Annotated:
         typ = typing.get_args(typ)[0]
     return typ
+
+
+class _InvalidSchemaBase(ABC):
+    pass
 
 
 def _resolve_tag(cls: type[Config], discriminator_field_name: str) -> str:
@@ -360,7 +365,16 @@ class Registry(Generic[TConfig]):
 
         # Make sure at least one element is registered
         if not self._elements:
-            return core_schema.invalid_schema(ref=self.base_cls.__name__)
+            schema = core_schema.is_subclass_schema(
+                _InvalidSchemaBase,
+                ref=self.base_cls.__name__,
+                cls_repr="InvalidSchema",
+            )
+            log.debug(
+                f"Generated empty schema for {self.base_cls} with no registered types."
+                f" Returning {schema}"
+            )
+            return schema
 
         # Construct the choices for the union schema
         choices: dict[str, core_schema.CoreSchema] = {}
@@ -370,11 +384,13 @@ class Registry(Generic[TConfig]):
         log.debug(
             f"Generated schema for {self.base_cls} with {len(choices)} choices. Choices: {choices.keys()}"
         )
-        return core_schema.tagged_union_schema(
+        schema = core_schema.tagged_union_schema(
             choices,
             discriminator=self.discriminator,
             ref=self.base_cls.__name__,
         )
+        log.debug(f"Generated schema for {self.base_cls}: {schema}")
+        return schema
 
     def type_adapter(self):
         """Create a TypeAdapter for validating against the registry's types.
@@ -508,7 +524,9 @@ class Registry(Generic[TConfig]):
                 source_type: Any,
                 handler: GetCoreSchemaHandler,
             ) -> core_schema.CoreSchema:
-                return cls.__nshconfig_registry__.pydantic_schema()
+                schema = cls.__nshconfig_registry__.pydantic_schema()
+                log.debug(f"Generated schema for {cls}: {schema}")
+                return schema
 
         return _RegistryTypeAnnotation
 
