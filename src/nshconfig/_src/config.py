@@ -123,9 +123,6 @@ class Config(BaseModel, _MutableMappingBase):
     """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(  # type: ignore
-        # By default, Pydantic will throw a warning if a field starts with "model_",
-        # so we need to disable that warning (beacuse "model_" is a popular prefix for ML).
-        protected_namespaces=(),
         validate_assignment=True,
         validate_return=True,
         validate_default=True,
