@@ -402,7 +402,9 @@ class Registry(Generic[TConfig]):
 
         # Construct the annotated union type.
         t = typing.Union[tuple(e.cls for e in self._elements)]  # type: ignore
-        t = typing.Annotated[t, Field(discriminator=self.discriminator)]
+        field_info = Field(discriminator=self.discriminator)
+        field_info.annotation = t
+        t = typing.Annotated[t, field_info]
 
         # Create the TypeAdapter class for this type
         return TypeAdapter[TConfig](t)
