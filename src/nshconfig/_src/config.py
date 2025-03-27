@@ -459,7 +459,7 @@ class Config(BaseModel, _MutableMappingBase):
         See https://github.com/pydantic/pydantic/discussions/9108#discussioncomment-8926452
         for the original implementation."""
         dumped = next_serializer(self)
-        for name, field_info in self.model_fields.items():
+        for name, field_info in type(self).model_fields.items():
             if get_origin(field_info.annotation) == Literal:
                 dumped[name] = getattr(self, name)
         return dumped
