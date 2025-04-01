@@ -1,19 +1,19 @@
-[tool.poetry]
+[project]
 name = "nshconfig"
 version = "0.36.0"
 description = "Fully typed configuration management, powered by Pydantic"
-authors = ["Nima Shoghi <nimashoghi@gmail.com>"]
+authors = [{ name = "Nima Shoghi", email = "nimashoghi@gmail.com" }]
 readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["pydantic>=2.10.0,<2.11.0", "typing-inspect"]
 
-[tool.poetry.urls]
+[project.optional-dependencies]
+extra = ["treescope", "pydantic-yaml"]
+yaml = ["pydantic-yaml"]
+docs = ["sphinx", "sphinx-rtd-theme", "myst-parser", "sphinx-copybutton"]
+
+[project.urls]
 homepage = "https://github.com/nimashoghi/nshconfig"
-
-[tool.poetry.dependencies]
-python = "^3.10"
-pydantic = ">=2.10.0,<2.11.0"
-typing-inspect = "*"
-treescope = { version = "*", optional = true }
-pydantic-yaml = { version = "*", optional = true }
 
 [tool.poetry.group.dev.dependencies]
 basedpyright = "*"
@@ -26,6 +26,9 @@ sphinx = { version = "*", optional = true }
 sphinx-rtd-theme = { version = "*", optional = true }
 myst-parser = { version = "*", optional = true }
 sphinx-copybutton = { version = "*", optional = true }
+
+[project.scripts]
+nshconfig-export = "nshconfig.bin.export:main"
 
 [build-system]
 requires = ["poetry-core"]
@@ -45,14 +48,6 @@ ignore = ["F722", "F821", "E731", "E741"]
 
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
-
-[tool.poetry.extras]
-extra = ["treescope", "pydantic-yaml"]
-yaml = ["pydantic-yaml"]
-docs = ["sphinx", "sphinx-rtd-theme", "myst-parser", "sphinx-copybutton"]
-
-[tool.poetry.scripts]
-nshconfig-export = "nshconfig.bin.export:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
