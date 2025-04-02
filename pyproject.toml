@@ -34,7 +34,7 @@ nshconfig-export = "nshconfig.bin.export:main"
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
-[tool.pyright]
+[tool.basedpyright]
 typeCheckingMode = "standard"
 deprecateTypingAliases = true
 strictListInference = true
