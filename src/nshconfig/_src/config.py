@@ -149,7 +149,7 @@ class Config(BaseModel, _MutableMappingBase):
         # Look through fields for registry annotations including nested types
         registries: list[Registry] = []
         registry_ids: set[int] = set()
-        for name, field in cls.model_fields.items():
+        for name, field in cls.__pydantic_fields__.items():
             if not (found_registries := extract_registries_from_field_info(field)):
                 continue
 
@@ -403,7 +403,7 @@ class Config(BaseModel, _MutableMappingBase):
         See https://github.com/pydantic/pydantic/discussions/9108#discussioncomment-8926452
         for the original implementation."""
         dumped = next_serializer(self)
-        for name, field_info in type(self).model_fields.items():
+        for name, field_info in type(self).__pydantic_fields__.items():
             if get_origin(field_info.annotation) == Literal:
                 dumped[name] = getattr(self, name)
         return dumped

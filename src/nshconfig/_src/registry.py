@@ -38,7 +38,9 @@ class _InvalidSchemaBase(ABC):
 
 def _resolve_tag(cls: type[Config], discriminator_field_name: str) -> str:
     # Make sure cls has the discriminator attribute
-    if (discriminator_field := cls.model_fields.get(discriminator_field_name)) is None:
+    if (
+        discriminator_field := cls.__pydantic_fields__.get(discriminator_field_name)
+    ) is None:
         raise ValueError(f"{cls} does not have a field `{discriminator_field_name}`")
 
     # Make sure the discriminator field is a Literal
