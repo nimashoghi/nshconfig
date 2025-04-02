@@ -15,7 +15,7 @@ from pydantic.main import IncEx
 from typing_extensions import Self, TypedDict, Unpack, override
 
 from .missing import MISSING as _MISSING
-from .missing import validate_no_missing_values
+from .missing import validate_no_missing
 
 if TYPE_CHECKING:
     from ruamel.yaml import YAML
@@ -177,6 +177,10 @@ class Config(BaseModel, _MutableMappingBase):
         """Called after the final config is validated."""
         pass
 
+    def __after_post_init__(self):
+        """Called after __post_init__ is successfully called."""
+        pass
+
     def model_deep_validate(self, strict: bool = True):
         """
         Validate the config and all of its sub-configs.
@@ -227,11 +231,10 @@ class Config(BaseModel, _MutableMappingBase):
 
         self.__post_init__()
 
-        # After `_post_init__` is called, we perform the final round of validation
-        self.model_post_init_validate()
+        self.__after_post_init__()
 
-    def model_post_init_validate(self):
-        validate_no_missing_values(self)
+    def model_validate_no_missing(self):
+        validate_no_missing(self)
 
     @classmethod
     def model_construct_draft(cls, _fields_set: set[str] | None = None, **values: Any):
