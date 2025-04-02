@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import importlib.util
 import json
 import logging
@@ -25,9 +26,6 @@ log = logging.getLogger(__name__)
 _MutableMappingBase = MutableMapping[str, Any]
 if TYPE_CHECKING:
     _MutableMappingBase = object
-
-
-_DraftConfigContextSentinel = object()
 
 
 class ConfigDict(_ConfigDict, total=False):
@@ -208,12 +206,24 @@ class Config(BaseModel, _MutableMappingBase):
         # Then, we dump the config to a dict and then re-validate it
         return self.model_deep_validate(strict=strict)
 
+    _patched_post_init: ClassVar[bool] = False
+
+    @classmethod
+    @contextlib.contextmanager
+    @classmethod
+    def _nshconfig_patch_model_post_init(cls):
+        cls._patched_post_init = True
+        try:
+            yield
+        finally:
+            cls._patched_post_init = False
+
     @override
     def model_post_init(self, __context: Any) -> None:
         super().model_post_init(__context)
 
         # Call the `__post_init__` method if this is not a draft config
-        if __context is _DraftConfigContextSentinel:
+        if self._patched_post_init:
             return
 
         self.__post_init__()
@@ -227,76 +237,16 @@ class Config(BaseModel, _MutableMappingBase):
     @classmethod
     def model_construct_draft(cls, _fields_set: set[str] | None = None, **values: Any):
         """
-        NOTE: This is a copy of the `model_construct` method from Pydantic's `Model` class,
+        This is a copy of the `model_construct` method from Pydantic's `Model` class,
             with the following changes:
             - The `model_post_init` method is called with the `_DraftConfigContext` context.
             - The `_is_draft_config` attribute is set to `True` in the `values` dict.
-
-        Creates a new instance of the `Model` class with validated data.
-
-        Creates a new model setting `__dict__` and `__pydantic_fields_set__` from trusted or pre-validated data.
-        Default values are respected, but no other validation is performed.
-
-        !!! note
-            `model_construct()` generally respects the `model_config.extra` setting on the provided model.
-            That is, if `model_config.extra == 'allow'`, then all extra passed values are added to the model instance's `__dict__`
-            and `__pydantic_extra__` fields. If `model_config.extra == 'ignore'` (the default), then all extra passed values are ignored.
-            Because no validation is performed with a call to `model_construct()`, having `model_config.extra == 'forbid'` does not result in
-            an error if extra values are passed, but they will be ignored.
-
-        Args:
-            _fields_set: The set of field names accepted for the Model instance.
-            values: Trusted or pre-validated data dictionary.
-
-        Returns:
-            A new instance of the `Model` class with validated data.
         """
 
+        values = copy.deepcopy(values)
         values["_is_draft_config"] = True
-
-        m = cls.__new__(cls)
-        fields_values: dict[str, Any] = {}
-        fields_set = set()
-
-        for name, field in cls.model_fields.items():
-            if field.alias and field.alias in values:
-                fields_values[name] = values.pop(field.alias)
-                fields_set.add(name)
-            elif name in values:
-                fields_values[name] = values.pop(name)
-                fields_set.add(name)
-            elif not field.is_required():
-                fields_values[name] = field.get_default(call_default_factory=True)
-        if _fields_set is None:
-            _fields_set = fields_set
-
-        _extra: dict[str, Any] | None = None
-        if cls.model_config.get("extra") == "allow":
-            _extra = {}
-            for k, v in values.items():
-                _extra[k] = v
-        object.__setattr__(m, "__dict__", fields_values)
-        object.__setattr__(m, "__pydantic_fields_set__", _fields_set)
-        if not cls.__pydantic_root_model__:
-            object.__setattr__(m, "__pydantic_extra__", _extra)
-
-        if cls.__pydantic_post_init__:
-            m.model_post_init(_DraftConfigContextSentinel)
-            # update private attributes with values set
-            if (
-                hasattr(m, "__pydantic_private__")
-                and m.__pydantic_private__ is not None
-            ):
-                for k, v in values.items():
-                    if k in m.__private_attributes__:
-                        m.__pydantic_private__[k] = v
-
-        elif not cls.__pydantic_root_model__:
-            # Note: if there are any private attributes, cls.__pydantic_post_init__ would exist
-            # Since it doesn't, that means that `__pydantic_private__` should be set to None
-            object.__setattr__(m, "__pydantic_private__", None)
-
-        return m
+        with cls._nshconfig_patch_model_post_init():
+            return cls.model_construct(_fields_set, **values)
 
     @contextlib.contextmanager
     def __patch_validator_validate_assignment(self):
