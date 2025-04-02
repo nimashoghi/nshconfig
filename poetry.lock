@@ -2108,5 +2108,5 @@ yaml = ["pydantic-yaml"]
 
 [metadata]
 lock-version = "2.1"
-python-versions = ">=3.10"
-content-hash = "1d22baef25922717b468e56e70be6bc030ba1d6bc40561d5c673ec21bccf2761"
+python-versions = ">=3.10,<4.0"
+content-hash = "6ff7d5ac988096015b2ebf1054f030cadfff247f8b68b269ceb8e19e3a7aafd3"
