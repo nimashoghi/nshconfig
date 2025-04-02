@@ -2041,7 +2041,6 @@ files = [
     {file = "typing_extensions-4.13.0-py3-none-any.whl", hash = "sha256:c8dd92cc0d6425a97c18fbb9d1954e5ff92c1ca881a309c45f06ebc0b79058e5"},
     {file = "typing_extensions-4.13.0.tar.gz", hash = "sha256:0a4ac55a5820789d87e297727d229866c9650f6521b64206413c4fbada24d95b"},
 ]
-markers = {dev = "python_version < \"3.12\""}
 
 [[package]]
 name = "typing-inspect"
@@ -2109,4 +2108,4 @@ yaml = ["pydantic-yaml"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "6ff7d5ac988096015b2ebf1054f030cadfff247f8b68b269ceb8e19e3a7aafd3"
+content-hash = "70fdec64bdb31b593e1ac96e879c6597087e2ec8bf31a6de6b0f032aba1dd0c4"
