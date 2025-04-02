@@ -4,7 +4,7 @@ import dataclasses
 import logging
 import typing
 from abc import ABC
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any, Generic, Literal, TypedDict, TypeVar, cast
 
 from pydantic import GetCoreSchemaHandler
@@ -30,10 +30,6 @@ def _unwrap_annotated_recurive(typ: Any):
     while typing.get_origin(typ) is typing.Annotated:
         typ = typing.get_args(typ)[0]
     return typ
-
-
-class _InvalidSchemaBase(ABC):
-    pass
 
 
 def _resolve_tag(cls: type[Config], discriminator_field_name: str) -> str:
@@ -178,6 +174,30 @@ class Registry(Generic[TConfig]):
     _on_register_callbacks: list[Callable[[type[Config]], None]] = dataclasses.field(
         default_factory=lambda: []
     )
+
+    def _ref(
+        self,
+        prefix: Iterable[str] | None = None,
+        suffix: Iterable[str] | None = None,
+    ):
+        """Get the reference name for the registry.
+
+        This is used for Pydantic schema generation and should be unique
+        for each registry instance.
+        """
+        if prefix is None:
+            prefix = ()
+        if suffix is None:
+            suffix = ()
+        lhs = [
+            *prefix,
+            f"{self.base_cls.__module__}.{self.base_cls.__name__}Registry",
+            *suffix,
+        ]
+        lhs = "_".join(lhs)
+        rhs = [str(id(self))]
+        rhs = "_".join(rhs)
+        return f"{lhs}:{rhs}"
 
     def register(self, cls: TClass, /) -> TClass:
         """Register a new type with the registry.
@@ -355,22 +375,17 @@ class Registry(Generic[TConfig]):
 
         if is_exporting:
             return core_schema.json_or_python_schema(
-                json_schema=core_schema.any_schema(
-                    ref=f"{self.base_cls.__name__}_json"
-                ),
+                json_schema=core_schema.any_schema(ref=self._ref(suffix=("json",))),
                 python_schema=core_schema.is_instance_schema(
-                    self.base_cls,
-                    ref=f"{self.base_cls.__name__}_python",
+                    self.base_cls, ref=self._ref(suffix=("python",))
                 ),
-                ref=self.base_cls.__name__,
+                ref=self._ref(),
             )
 
         # Make sure at least one element is registered
         if not self._elements:
-            schema = core_schema.is_subclass_schema(
-                _InvalidSchemaBase,
-                ref=self.base_cls.__name__,
-                cls_repr="InvalidSchema",
+            schema = core_schema.invalid_schema(
+                ref=self._ref(),
             )
             log.debug(
                 f"Generated empty schema for {self.base_cls} with no registered types."
@@ -389,9 +404,8 @@ class Registry(Generic[TConfig]):
         schema = core_schema.tagged_union_schema(
             choices,
             discriminator=self.discriminator,
-            ref=self.base_cls.__name__,
+            ref=self._ref(),
         )
-        log.debug(f"Generated schema for {self.base_cls}: {schema}")
         return schema
 
     def type_adapter(self):
@@ -573,7 +587,7 @@ def _recursively_find_registry_annotations(typ: Any) -> list[Registry]:
 
 def _extract_registry_from_annotation(annotation: Any):
     if (
-        not hasattr(annotation, "__nshconfig_dynamic_resolution__")
+        not getattr(annotation, "__nshconfig_dynamic_resolution__", False)
         or (registry := getattr(annotation, "__nshconfig_registry__", None)) is None
     ):
         return None
