@@ -210,7 +210,6 @@ class Config(BaseModel, _MutableMappingBase):
 
     @classmethod
     @contextlib.contextmanager
-    @classmethod
     def _nshconfig_patch_model_post_init(cls):
         cls._patched_post_init = True
         try:
@@ -249,7 +248,7 @@ class Config(BaseModel, _MutableMappingBase):
             return cls.model_construct(_fields_set, **values)
 
     @contextlib.contextmanager
-    def __patch_validator_validate_assignment(self):
+    def _nshconfig_patch_validator_validate_assignment(self):
         prev_value = self.model_config.get("validate_assignment", _notset := object())
         try:
             # We temporarily disable the validation of assignments
@@ -272,7 +271,9 @@ class Config(BaseModel, _MutableMappingBase):
                 if self._is_draft_config and self.model_config.get(
                     "no_validate_assignment_for_draft", True
                 ):
-                    stack.enter_context(self.__patch_validator_validate_assignment())
+                    stack.enter_context(
+                        self._nshconfig_patch_validator_validate_assignment()
+                    )
                 return super().__setattr__(name, value)
 
     @override
