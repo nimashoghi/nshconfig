@@ -15,9 +15,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
-import typing_inspect
 from typing_extensions import TypeAliasType
 
+from . import typing_inspect_ as typing_inspect
 from .config import Config
 from .json_schema import convert_schema
 from .registry import Registry

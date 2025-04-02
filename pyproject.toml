@@ -1,15 +1,11 @@
 [project]
 name = "nshconfig"
-version = "0.38.3"
+version = "0.38.4"
 description = "Fully typed configuration management, powered by Pydantic"
 authors = [{ name = "Nima Shoghi", email = "nimashoghi@gmail.com" }]
 readme = "README.md"
 requires-python = ">=3.10,<4.0"
-dependencies = [
-    "pydantic>=2.10.0,<2.11.0",
-    "typing-extensions",
-    "typing-inspect",
-]
+dependencies = ["pydantic>=2.10.0,<2.11.0", "typing-extensions"]
 
 [project.optional-dependencies]
 extra = ["treescope", "pydantic-yaml"]
