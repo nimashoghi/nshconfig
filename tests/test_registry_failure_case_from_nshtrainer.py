@@ -12,6 +12,7 @@ import nshconfig as C
 def test_nested_annotation_case_from_nshtrainer():
     # This test is a simplified version of the one in nshtrainer,
     # which currently fails with pydantic>=2.11, but works with pydantic<2.11.
+    # Track the following issue: https://github.com/pydantic/pydantic/issues/11682
     class PluginBaseConfig(C.Config, ABC):
         pass
 
