@@ -3,9 +3,8 @@ from __future__ import annotations
 import dataclasses
 import logging
 import typing
-from abc import ABC
-from collections.abc import Callable, Iterable
-from typing import Any, Generic, Literal, TypedDict, TypeVar, cast
+from collections.abc import Callable
+from typing import Any, ClassVar, Generic, Literal, TypedDict, TypeVar, cast
 
 from pydantic import GetCoreSchemaHandler
 from pydantic.fields import FieldInfo
@@ -171,33 +170,9 @@ class Registry(Generic[TConfig]):
         }
     )
     _elements: list[_RegistryEntry] = dataclasses.field(default_factory=lambda: [])
-    _on_register_callbacks: list[Callable[[type[Config]], None]] = dataclasses.field(
-        default_factory=lambda: []
+    _on_register_callbacks: list[Callable[[type[Config] | None], None]] = (
+        dataclasses.field(default_factory=lambda: [])
     )
-
-    def _ref(
-        self,
-        prefix: Iterable[str] | None = None,
-        suffix: Iterable[str] | None = None,
-    ):
-        """Get the reference name for the registry.
-
-        This is used for Pydantic schema generation and should be unique
-        for each registry instance.
-        """
-        if prefix is None:
-            prefix = ()
-        if suffix is None:
-            suffix = ()
-        lhs = [
-            *prefix,
-            f"{self.base_cls.__module__}.{self.base_cls.__name__}Registry",
-            *suffix,
-        ]
-        lhs = "_".join(lhs)
-        rhs = [str(id(self))]
-        rhs = "_".join(rhs)
-        return f"{lhs}:{rhs}"
 
     def register(self, cls: TClass, /) -> TClass:
         """Register a new type with the registry.
@@ -258,8 +233,14 @@ class Registry(Generic[TConfig]):
         log.info(f"Registered {cls} with tag '{tag}'.")
 
         # Call the on_register callbacks
+        log.debug(
+            f"Calling {len(self._on_register_callbacks)} on_register callbacks for {cls}."
+        )
         for callback in self._on_register_callbacks:
             callback(cls)
+        log.debug(
+            f"Called {len(self._on_register_callbacks)} on_register callbacks for {cls}."
+        )
 
         return cast(TClass, cls)
 
@@ -351,12 +332,12 @@ class Registry(Generic[TConfig]):
             The decorated class
         """
 
-        def _rebuild(_: type[Config]):
+        def _rebuild(_newly_registered_cls: type[Config] | None):
             cls.model_rebuild(force=True, raise_errors=False)
             log.info(f"Rebuilt {cls} schema due to registry changes.")
 
         self._on_register_callbacks.append(_rebuild)
-        _rebuild(cls)
+        _rebuild(None)
         return cls
 
     def pydantic_schema(self):
@@ -374,39 +355,29 @@ class Registry(Generic[TConfig]):
         from .export import is_exporting
 
         if is_exporting:
-            return core_schema.json_or_python_schema(
-                json_schema=core_schema.any_schema(ref=self._ref(suffix=("json",))),
-                python_schema=core_schema.is_instance_schema(
-                    self.base_cls, ref=self._ref(suffix=("python",))
-                ),
-                ref=self._ref(),
-            )
+            from pydantic import TypeAdapter
 
-        # Make sure at least one element is registered
+            return TypeAdapter(self.base_cls).core_schema
+
+        return self.type_adapter().core_schema
+
+    def type_hint(self):
+        """Create a type hint for the union of all registered types."""
+        from pydantic import Field
+
         if not self._elements:
-            schema = core_schema.invalid_schema(
-                ref=self._ref(),
-            )
-            log.debug(
-                f"Generated empty schema for {self.base_cls} with no registered types."
-                f" Returning {schema}"
-            )
-            return schema
+            from .invalid import Invalid
 
-        # Construct the choices for the union schema
-        choices: dict[str, core_schema.CoreSchema] = {}
-        for e in self._elements:
-            cls = cast(type[Config], e.cls)
-            choices[e.tag] = cls.__pydantic_core_schema__
-        log.debug(
-            f"Generated schema for {self.base_cls} with {len(choices)} choices. Choices: {choices.keys()}"
-        )
-        schema = core_schema.tagged_union_schema(
-            choices,
-            discriminator=self.discriminator,
-            ref=self._ref(),
-        )
-        return schema
+            # If no elements are registered, just use the Invalid type.
+            t = Invalid
+        else:
+            # Construct the annotated union type.
+            t = typing.Union[tuple(e.cls for e in self._elements)]
+            field_info = Field(discriminator=self.discriminator)
+            field_info.annotation = t
+            t = typing.Annotated[t, field_info]
+
+        return t
 
     def type_adapter(self):
         """Create a TypeAdapter for validating against the registry's types.
@@ -414,16 +385,9 @@ class Registry(Generic[TConfig]):
         Returns:
             A TypeAdapter for validating/serializing registry types
         """
-        from pydantic import Field, TypeAdapter
+        from pydantic import TypeAdapter
 
-        # Construct the annotated union type.
-        t = typing.Union[tuple(e.cls for e in self._elements)]  # type: ignore
-        field_info = Field(discriminator=self.discriminator)
-        field_info.annotation = t
-        t = typing.Annotated[t, field_info]
-
-        # Create the TypeAdapter class for this type
-        return TypeAdapter[TConfig](t)
+        return TypeAdapter[TConfig](self.type_hint())
 
     def construct(self, config: Any) -> TConfig:
         """Construct a registered type instance from configuration data.
@@ -533,8 +497,8 @@ class Registry(Generic[TConfig]):
         registry = self
 
         class _RegistryTypeAnnotation:
-            __nshconfig_dynamic_resolution__ = True
-            __nshconfig_registry__ = registry
+            __nshconfig_dynamic_resolution__: ClassVar = True
+            __nshconfig_registry__: ClassVar = registry
 
             @classmethod
             def __get_pydantic_core_schema__(

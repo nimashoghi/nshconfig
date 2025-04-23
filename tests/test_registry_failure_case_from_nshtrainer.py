@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC
 from collections.abc import Sequence
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from typing_extensions import TypeAliasType
 
@@ -18,7 +18,7 @@ def test_nested_annotation_case_from_nshtrainer():
 
     plugin_registry = C.Registry(PluginBaseConfig, discriminator="name")
     PluginConfig = TypeAliasType(  # type: ignore
-        "PluginConfig", Annotated[PluginBaseConfig, plugin_registry.DynamicResolution()]
+        "PluginConfig", Annotated[Any, plugin_registry.DynamicResolution()]
     )
 
     @plugin_registry.register
