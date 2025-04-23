@@ -3,7 +3,6 @@ from __future__ import annotations
 import dataclasses
 import logging
 import typing
-from abc import ABC
 from collections.abc import Callable, Iterable
 from typing import Any, Generic, Literal, TypedDict, TypeVar, cast
 
@@ -382,22 +381,12 @@ class Registry(Generic[TConfig]):
                 ref=self._ref(),
             )
 
-        # Make sure at least one element is registered
-        if not self._elements:
-            schema = core_schema.invalid_schema(
-                ref=self._ref(),
-            )
-            log.debug(
-                f"Generated empty schema for {self.base_cls} with no registered types."
-                f" Returning {schema}"
-            )
-            return schema
+        from pydantic import TypeAdapter
 
         # Construct the choices for the union schema
         choices: dict[str, core_schema.CoreSchema] = {}
         for e in self._elements:
-            cls = cast(type[Config], e.cls)
-            choices[e.tag] = cls.__pydantic_core_schema__
+            choices[e.tag] = TypeAdapter(e.cls).core_schema
         log.debug(
             f"Generated schema for {self.base_cls} with {len(choices)} choices. Choices: {choices.keys()}"
         )
@@ -417,7 +406,7 @@ class Registry(Generic[TConfig]):
         from pydantic import Field, TypeAdapter
 
         # Construct the annotated union type.
-        t = typing.Union[tuple(e.cls for e in self._elements)]  # type: ignore
+        t = typing.Union[tuple(e.cls for e in self._elements)]
         field_info = Field(discriminator=self.discriminator)
         field_info.annotation = t
         t = typing.Annotated[t, field_info]
