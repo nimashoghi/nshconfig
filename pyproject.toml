@@ -1,6 +1,6 @@
 [project]
 name = "nshconfig"
-version = "0.39.3"
+version = "0.40.0-beta0"
 description = "Fully typed configuration management, powered by Pydantic"
 authors = [{ name = "Nima Shoghi", email = "nimashoghi@gmail.com" }]
 readme = "README.md"
