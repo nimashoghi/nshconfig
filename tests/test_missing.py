@@ -159,25 +159,23 @@ def test_allow_missing_json_schema():
     # Get the JSON schema
     json_schema = TestConfig.model_json_schema()
     assert json_schema == {
-        "$defs": {
-            "_NSHCONFIG_MISSING_CLS": {
-                "properties": {
-                    "__nshconfig_missing__": {
-                        "const": True,
-                        "default": True,
-                        "title": "Nshconfig Missing",
-                        "type": "boolean",
-                    }
-                },
-                "title": "_NSHCONFIG_MISSING_CLS",
-                "type": "object",
-            }
-        },
         "properties": {
             "field": {
                 "anyOf": [
                     {"type": "string"},
-                    {"$ref": "#/$defs/_NSHCONFIG_MISSING_CLS"},
+                    {
+                        "properties": {
+                            "__nshconfig_missing__": {
+                                "const": True,
+                                "title": "Nshconfig Missing",
+                                "type": "boolean",
+                            },
+                        },
+                        "required": [
+                            "__nshconfig_missing__",
+                        ],
+                        "type": "object",
+                    },
                 ],
                 "default": {"__nshconfig_missing__": True},
                 "title": "Field",

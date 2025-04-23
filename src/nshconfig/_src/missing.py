@@ -41,25 +41,19 @@ class AllowMissing:
         )
         json_schema = core_schema.union_schema(
             [base_schema, missing_literal_schema],
-            strict=self.strict,
             mode="left_to_right",
         )
 
         # Python schema
         python_schema = core_schema.union_schema(
             [base_schema, core_schema.is_instance_schema(_NSHCONFIG_MISSING_CLS)],
-            strict=self.strict,
             mode="left_to_right",
         )
 
         # Final schema
-        schema = core_schema.union_schema(
-            [
-                handler(source_type),
-                cast(Any, _NSHCONFIG_MISSING_CLS).__pydantic_core_schema__,
-            ],
-            strict=self.strict,
-            mode="left_to_right",
+        schema = core_schema.json_or_python_schema(
+            json_schema=json_schema,
+            python_schema=python_schema,
         )
         return schema
 
