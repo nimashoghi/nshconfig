@@ -4,7 +4,7 @@ import dataclasses
 import logging
 import typing
 from collections.abc import Callable, Iterable
-from typing import Any, Generic, Literal, TypedDict, TypeVar, cast
+from typing import Any, ClassVar, Generic, Literal, TypedDict, TypeVar, cast
 
 from pydantic import GetCoreSchemaHandler
 from pydantic.fields import FieldInfo
@@ -397,22 +397,33 @@ class Registry(Generic[TConfig]):
         )
         return schema
 
+    def type_hint(self):
+        """Create a type hint for the union of all registered types."""
+        from pydantic import Field
+
+        if not self._elements:
+            from .invalid import Invalid
+
+            # If no elements are registered, just use the Invalid type.
+            t = Invalid
+        else:
+            # Construct the annotated union type.
+            t = typing.Union[tuple(e.cls for e in self._elements)]
+            field_info = Field(discriminator=self.discriminator)
+            field_info.annotation = t
+            t = typing.Annotated[t, field_info]
+
+        return t
+
     def type_adapter(self):
         """Create a TypeAdapter for validating against the registry's types.
 
         Returns:
             A TypeAdapter for validating/serializing registry types
         """
-        from pydantic import Field, TypeAdapter
+        from pydantic import TypeAdapter
 
-        # Construct the annotated union type.
-        t = typing.Union[tuple(e.cls for e in self._elements)]
-        field_info = Field(discriminator=self.discriminator)
-        field_info.annotation = t
-        t = typing.Annotated[t, field_info]
-
-        # Create the TypeAdapter class for this type
-        return TypeAdapter[TConfig](t)
+        return TypeAdapter[TConfig](self.type_hint())
 
     def construct(self, config: Any) -> TConfig:
         """Construct a registered type instance from configuration data.
@@ -522,8 +533,8 @@ class Registry(Generic[TConfig]):
         registry = self
 
         class _RegistryTypeAnnotation:
-            __nshconfig_dynamic_resolution__ = True
-            __nshconfig_registry__ = registry
+            __nshconfig_dynamic_resolution__: ClassVar = True
+            __nshconfig_registry__: ClassVar = registry
 
             @classmethod
             def __get_pydantic_core_schema__(
@@ -531,9 +542,7 @@ class Registry(Generic[TConfig]):
                 source_type: Any,
                 handler: GetCoreSchemaHandler,
             ) -> core_schema.CoreSchema:
-                schema = cls.__nshconfig_registry__.pydantic_schema()
-                log.debug(f"Generated schema for {cls}: {schema}")
-                return schema
+                return handler.generate_schema(cls.__nshconfig_registry__.type_hint())
 
         return _RegistryTypeAnnotation
 
