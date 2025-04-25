@@ -5,13 +5,15 @@ import sys
 from collections.abc import Iterable
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
+
+from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
     from .config import Config
 
 # Use string literal type annotation to avoid circular import
-T = TypeVar("T", bound="Config")
+TConfig = TypeVar("TConfig", bound="Config", infer_variance=True)
 
 
 @contextmanager
@@ -117,7 +119,7 @@ def extract_config_from_module(module: Any) -> Any:
     return config
 
 
-def parse_config_from_module(module: Any, config_cls: type[T]) -> T:
+def parse_config_from_module(module: Any, config_cls: type[TConfig]) -> TConfig:
     """Parse a config from a module.
 
     Args:
@@ -140,7 +142,9 @@ def parse_config_from_module(module: Any, config_cls: type[T]) -> T:
     return config
 
 
-def import_and_parse_python_file(path: str | Path, config_cls: type[T]) -> T:
+def import_and_parse_python_file(
+    path: str | Path, config_cls: type[TConfig]
+) -> TConfig:
     """Import and parse a config from a Python file.
 
     Args:
@@ -159,7 +163,9 @@ def import_and_parse_python_file(path: str | Path, config_cls: type[T]) -> T:
     return parse_config_from_module(module, config_cls)
 
 
-def import_and_parse_python_module(module_name: str, config_cls: type[T]) -> T:
+def import_and_parse_python_module(
+    module_name: str, config_cls: type[TConfig]
+) -> TConfig:
     """Import and parse a config from a Python module.
 
     Args:
@@ -177,6 +183,27 @@ def import_and_parse_python_module(module_name: str, config_cls: type[T]) -> T:
     return parse_config_from_module(module, config_cls)
 
 
+T = TypeVar("T", infer_variance=True)
+
+
+def deduplicate(values: Iterable[T]) -> list[T]:
+    """Deduplicate a list.
+
+    Args:
+        values: List to deduplicate
+
+    Returns:
+        A new list with duplicates removed
+    """
+    seen = set()
+    unique_configs: list[T] = []
+    for config in values:
+        if config not in seen:
+            seen.add(config)
+            unique_configs.append(config)
+    return unique_configs
+
+
 def deduplicate_configs(configs: Iterable[T]) -> list[T]:
     """Deduplicate a list of configs.
 
@@ -186,10 +213,4 @@ def deduplicate_configs(configs: Iterable[T]) -> list[T]:
     Returns:
         A new list with duplicates removed
     """
-    seen = set()
-    unique_configs: list[T] = []
-    for config in configs:
-        if config not in seen:
-            seen.add(config)
-            unique_configs.append(config)
-    return unique_configs
+    return deduplicate(configs)

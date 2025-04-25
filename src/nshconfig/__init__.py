@@ -12,6 +12,7 @@ from ._src.missing import AllowMissing as AllowMissing
 from ._src.missing import validate_no_missing as validate_no_missing
 from ._src.registry import Registry as Registry
 from ._src.registry import RegistryConfig as RegistryConfig
+from ._src.utils import deduplicate as deduplicate
 from ._src.utils import deduplicate_configs as deduplicate_configs
 
 try:
