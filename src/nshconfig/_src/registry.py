@@ -379,45 +379,6 @@ class Registry(Generic[TConfig]):
         _rebuild(cls)
         return cls
 
-    def pydantic_schema(self):
-        """Generate a Pydantic schema for the union of all registered types.
-
-        Returns:
-            A CoreSchema representing the discriminated union
-
-        Raises:
-            ValueError: If no types are registered
-        """
-
-        # If we're exporting, all we can check for is that the base class is of
-        # the correct type.
-        from .export import is_exporting
-
-        if is_exporting:
-            return core_schema.json_or_python_schema(
-                json_schema=core_schema.any_schema(ref=self._ref(suffix=("json",))),
-                python_schema=core_schema.is_instance_schema(
-                    self.base_cls, ref=self._ref(suffix=("python",))
-                ),
-                ref=self._ref(),
-            )
-
-        from pydantic import TypeAdapter
-
-        # Construct the choices for the union schema
-        choices: dict[str, core_schema.CoreSchema] = {}
-        for e in self._elements:
-            choices[e.tag] = TypeAdapter(e.cls).core_schema
-        log.debug(
-            f"Generated schema for {self.base_cls} with {len(choices)} choices. Choices: {choices.keys()}"
-        )
-        schema = core_schema.tagged_union_schema(
-            choices,
-            discriminator=self.discriminator,
-            ref=self._ref(),
-        )
-        return schema
-
     def type_hint(self):
         """Create a type hint for the union of all registered types."""
         from pydantic import Field
