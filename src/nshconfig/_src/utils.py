@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from collections.abc import Iterable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -176,7 +177,7 @@ def import_and_parse_python_module(module_name: str, config_cls: type[T]) -> T:
     return parse_config_from_module(module, config_cls)
 
 
-def deduplicate_configs(configs: list[T]) -> list[T]:
+def deduplicate_configs(configs: Iterable[T]) -> list[T]:
     """Deduplicate a list of configs.
 
     Args:
