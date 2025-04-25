@@ -467,6 +467,50 @@ class Registry(Generic[TConfig]):
 
         print(output)
 
+    @override
+    def __repr__(self) -> str:
+        """Return a string representation of the registry.
+
+        Provides a concise overview of the registry configuration and its registered types.
+        The representation includes the base class, discriminator field, and a summary
+        of registered types.
+
+        Returns
+        -------
+        str
+            A formatted string representation of the registry
+        """
+        base_name = f"{self.base_cls.__module__}.{self.base_cls.__name__}"
+        registered_types = len(self._elements)
+
+        # Start with the basic info
+        parts = [
+            f"Registry[{base_name}](",
+            f"  discriminator='{self.discriminator}',",
+            f"  registered_types={registered_types},",
+        ]
+
+        # Add policy info
+        policy = self.config.get("duplicate_tag_policy", "error")
+        parts.append(f"  duplicate_tag_policy='{policy}',")
+
+        auto_rebuild = self.config.get("auto_rebuild", True)
+        parts.append(f"  auto_rebuild={auto_rebuild},")
+
+        # Add registered tags if there are any
+        if self._elements:
+            parts.append("  tags=[")
+            # Sort by tag for consistent output
+            for entry in sorted(self._elements, key=lambda e: e.tag):
+                class_name = entry.cls.__name__
+                parts.append(f"    '{entry.tag}': {class_name},")
+            parts.append("  ]")
+        else:
+            parts.append("  tags=[]")
+
+        parts.append(")")
+
+        return "\n".join(parts)
 
     @deprecated(
         "This method is deprecated. You can directly use the registry instance instead (e.g., Annotated[AnimalBase, registry]).",
