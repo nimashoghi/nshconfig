@@ -3,11 +3,12 @@ from __future__ import annotations
 import logging
 import typing
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.annotated_handlers import GetCoreSchemaHandler
 from pydantic_core import CoreSchema, PydanticCustomError
+from typing_extensions import TypeVar
 
 log = logging.getLogger(__name__)
 
@@ -41,22 +42,39 @@ def _singleton_missing_config_new(cls, *args, **kwargs):
 if not TYPE_CHECKING:
     MissingValue.__new__ = classmethod(_singleton_missing_config_new)
 
+T = TypeVar("T", infer_variance=True)
 
-@dataclass(slots=True, frozen=True)
-class AllowMissing:
-    def __get_pydantic_core_schema__(
-        self,
-        source_type: Any,
-        handler: GetCoreSchemaHandler,
-    ) -> CoreSchema:
-        return handler.generate_schema(typing.Union[source_type, MissingValue])
+if TYPE_CHECKING:
+    # If we add configurable attributes to AllowMissing, we'd probably need to stop hiding it from type checkers like this
+    AllowMissing = Annotated[T, ...]
+    # `AllowMissing[Sequence]` will be recognized by type checkers as `Sequence`
+
+    _AllowMissing = object
+else:
+
+    @dataclass(slots=True, frozen=True)
+    class _AllowMissing:
+        def __get_pydantic_core_schema__(
+            self,
+            source_type: Any,
+            handler: GetCoreSchemaHandler,
+        ) -> CoreSchema:
+            return handler.generate_schema(typing.Union[source_type, MissingValue])
+
+        def __getitem__(self, item: T) -> T:
+            return cast(T, Annotated[item, self])
+
+        def __call__(self):
+            return self
+
+    AllowMissing = _AllowMissing()
 
 
 def validate_no_missing(model: BaseModel):
     for name, field in type(model).__pydantic_fields__.items():
         # If the field doesn't have the `AllowMissing` annotation, ignore it.
         #   (i.e., just let Pydantic do its thing).
-        if not any(isinstance(m, AllowMissing) for m in field.metadata):
+        if not any(isinstance(m, _AllowMissing) for m in field.metadata):
             log.debug(
                 f"Skipping field '{name}' as it does not have AllowMissing annotation."
             )

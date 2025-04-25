@@ -30,7 +30,7 @@ import nshconfig as C
 class MyConfig(C.Config):
     field1: int
     field2: str
-    field3: Annotated[float, C.AllowMissing()] = C.MISSING
+    field3: C.AllowMissing[float] = C.MISSING
 
 config = MyConfig.draft()
 config.field1 = 42

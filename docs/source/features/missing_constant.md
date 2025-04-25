@@ -27,11 +27,17 @@ age_str_lower = config.age_str.lower()
 
 In the above code, the type-checker will raise a complaint because `age_str` could be `None`. This is where the `MISSING` constant comes in handy:
 
+## Using MISSING with AllowMissing
+
+There are two syntaxes for using the `MISSING` constant with the `AllowMissing` feature:
+
+### Syntax 1: Using Annotated
+
 ```python
-# With MISSING:
+# With MISSING (Annotated syntax):
 class MyConfigWithMissing(C.Config):
     age: int
-    age_str: Annotated[str, C.AllowMissing()] = C.MISSING
+    age_str: Annotated[str, C.AllowMissing] = C.MISSING
 
     def __post_init__(self):
         if self.age_str is C.MISSING:
@@ -42,7 +48,28 @@ age_str_lower = config.age_str.lower()
 # ^ No more type-checker complaints!
 ```
 
-By using the `MISSING` constant, you can indicate that a field is not set during construction, and the type-checker will not raise any complaints.
+### Syntax 2: Direct AllowMissing Type
+
+A more concise syntax is available using `AllowMissing` directly as a generic type:
+
+```python
+# With MISSING (direct AllowMissing syntax):
+class MyConfigWithMissing(C.Config):
+    age: int
+    age_str: C.AllowMissing[str] = C.MISSING
+
+    def __post_init__(self):
+        if self.age_str is C.MISSING:
+            self.age_str = str(self.age)
+
+config = MyConfigWithMissing(age=10)
+age_str_lower = config.age_str.lower()
+# ^ No type-checker complaints with this syntax either!
+```
+
+This second syntax is more concise and follows modern Python typing patterns.
+
+By using either syntax with the `MISSING` constant, you can indicate that a field is not set during construction, and the type-checker will not raise any complaints.
 
 ## Validating No Missing Values
 
@@ -51,7 +78,7 @@ If you want to ensure that your configuration doesn't contain any `MISSING` valu
 ```python
 class MyConfig(C.Config):
     required_field: int
-    optional_field: Annotated[str, C.AllowMissing()] = C.MISSING
+    optional_field: C.AllowMissing[str] = C.MISSING  # Using the direct syntax
 
     def __post_init__(self):
         # Set default values, etc.
@@ -70,3 +97,30 @@ config1.optional_field  # "default value"
 ```
 
 The `model_validate_no_missing()` method is useful when you want to ensure all fields have proper values before using your configuration.
+
+## Using AllowMissing with Complex Types
+
+The `AllowMissing` feature works seamlessly with complex types like lists, dictionaries, and nested configurations:
+
+```python
+class NestedConfig(C.Config):
+    value: C.AllowMissing[str] = C.MISSING
+
+class ParentConfig(C.Config):
+    name: str
+    nested: C.AllowMissing[NestedConfig] = C.MISSING
+    items: C.AllowMissing[list[int]] = C.MISSING
+    settings: C.AllowMissing[dict[str, float]] = C.MISSING
+
+# Create with MISSING values
+config = ParentConfig(name="test")
+assert config.nested is C.MISSING
+assert config.items is C.MISSING
+assert config.settings is C.MISSING
+
+# Assign values later
+config.items = [1, 2, 3]
+config.settings = {"scale": 1.5, "offset": 0.1}
+```
+
+This flexibility allows for dynamic configuration patterns where some values might not be available at initialization time.
