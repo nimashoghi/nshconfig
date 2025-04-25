@@ -14,9 +14,6 @@ from pydantic import ConfigDict as _ConfigDict
 from pydantic.main import IncEx
 from typing_extensions import Self, TypedDict, Unpack, override
 
-from .missing import MISSING as _MISSING
-from .missing import validate_no_missing
-
 if TYPE_CHECKING:
     from ruamel.yaml import YAML
 
@@ -115,11 +112,6 @@ class Config(BaseModel, _MutableMappingBase):
         ```
     """
 
-    MISSING: ClassVar[Any] = _MISSING
-    """
-    Alias for the `MISSING` constant.
-    """
-
     model_config: ClassVar[ConfigDict] = ConfigDict(  # type: ignore
         validate_assignment=True,
         validate_return=True,
@@ -138,6 +130,7 @@ class Config(BaseModel, _MutableMappingBase):
         def __init_subclass__(cls, **kwargs: Unpack[ConfigDict]) -> None:
             super().__init_subclass__(**kwargs)
 
+    @override
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs) -> None:
         super().__pydantic_init_subclass__(**kwargs)
@@ -234,6 +227,8 @@ class Config(BaseModel, _MutableMappingBase):
         self.__after_post_init__()
 
     def model_validate_no_missing(self):
+        from .missing import validate_no_missing
+
         validate_no_missing(self)
 
     @classmethod

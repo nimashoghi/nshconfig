@@ -6,7 +6,7 @@ import pytest
 from pydantic_core import PydanticCustomError
 
 import nshconfig as C
-from nshconfig._src.missing import validate_no_missing
+from nshconfig._src.missing import MissingValue, validate_no_missing
 
 
 def test_missing_constant_identity():
@@ -159,28 +159,42 @@ def test_allow_missing_json_schema():
     # Get the JSON schema
     json_schema = TestConfig.model_json_schema()
     assert json_schema == {
+        "$defs": {
+            "MissingValue": {
+                "additionalProperties": False,
+                "properties": {
+                    "NSHCONFIG___MISSING_SENTINEL": {
+                        "const": "NSHCONFIG___MISSING_SENTINEL_VALUE",
+                        "default": "NSHCONFIG___MISSING_SENTINEL_VALUE",
+                        "title": "Missing",
+                        "type": "string",
+                    },
+                },
+                "title": "MissingValue",
+                "type": "object",
+            },
+        },
         "properties": {
             "field": {
                 "anyOf": [
                     {"type": "string"},
-                    {
-                        "properties": {
-                            "__nshconfig_missing__": {
-                                "const": True,
-                                "title": "Nshconfig Missing",
-                                "type": "boolean",
-                            },
-                        },
-                        "required": [
-                            "__nshconfig_missing__",
-                        ],
-                        "type": "object",
-                    },
+                    {"$ref": "#/$defs/MissingValue"},
                 ],
-                "default": {"__nshconfig_missing__": True},
+                "default": {
+                    "NSHCONFIG___MISSING_SENTINEL": "NSHCONFIG___MISSING_SENTINEL_VALUE"
+                },
                 "title": "Field",
-            }
+            },
         },
         "title": "TestConfig",
         "type": "object",
     }
+
+
+def test_missing_single_instance():
+    """Test that MissingValue always returns the same instance."""
+    assert MissingValue() is C.MISSING
+    assert MissingValue.model_validate({}) is C.MISSING
+    assert MissingValue.model_validate_json("{}") is C.MISSING
+    assert MissingValue.model_validate_strings({}) is C.MISSING
+    assert MissingValue.model_construct() is C.MISSING

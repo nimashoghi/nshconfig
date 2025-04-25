@@ -1,64 +1,55 @@
 from __future__ import annotations
 
 import logging
+import typing
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
-import pydantic
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.annotated_handlers import GetCoreSchemaHandler
-from pydantic_core import CoreSchema, PydanticCustomError, core_schema
+from pydantic_core import CoreSchema, PydanticCustomError
 
 log = logging.getLogger(__name__)
 
 
-@pydantic.dataclasses.dataclass(frozen=True, slots=True)
-class _NSHCONFIG_MISSING_CLS:
-    __nshconfig_missing__: Literal[True] = True
+class MissingValue(BaseModel):
+    model_config: ClassVar[ConfigDict] = {
+        "strict": True,
+        "frozen": True,
+        "extra": "forbid",
+    }
+
+    NSHCONFIG___MISSING_SENTINEL: Literal["NSHCONFIG___MISSING_SENTINEL_VALUE"] = Field(
+        default="NSHCONFIG___MISSING_SENTINEL_VALUE",
+        title="Missing",
+    )
+
+
+MISSING = cast(Any, MissingValue())
+"""A sentinel value to indicate a missing field.
+This is used to indicate that a field is missing from a model.
+This is a valid value for any field that has the `AllowMissing` annotation."""
+
+
+def _singleton_missing_config_new(cls, *args, **kwargs):
+    """Always returns the existing MISSING singleton instance."""
+    global MISSING
+    log.debug(f"Intercepted {cls.__name__}() call, returning singleton.")
+    return MISSING
+
+
+if not TYPE_CHECKING:
+    MissingValue.__new__ = classmethod(_singleton_missing_config_new)
 
 
 @dataclass(slots=True, frozen=True)
 class AllowMissing:
-    strict: bool = True
-    """Use strict mode for the field."""
-
     def __get_pydantic_core_schema__(
         self,
         source_type: Any,
         handler: GetCoreSchemaHandler,
     ) -> CoreSchema:
-        base_schema = handler(source_type)
-
-        # JSON schema
-        missing_literal_schema = core_schema.model_fields_schema(
-            {
-                "__nshconfig_missing__": core_schema.model_field(
-                    core_schema.literal_schema([True]),
-                    frozen=True,
-                ),
-            },
-            strict=self.strict,
-        )
-        json_schema = core_schema.union_schema(
-            [base_schema, missing_literal_schema],
-            mode="left_to_right",
-        )
-
-        # Python schema
-        python_schema = core_schema.union_schema(
-            [base_schema, core_schema.is_instance_schema(_NSHCONFIG_MISSING_CLS)],
-            mode="left_to_right",
-        )
-
-        # Final schema
-        schema = core_schema.json_or_python_schema(
-            json_schema=json_schema,
-            python_schema=python_schema,
-        )
-        return schema
-
-
-MISSING = cast(Any, _NSHCONFIG_MISSING_CLS())
+        return handler.generate_schema(typing.Union[source_type, MissingValue])
 
 
 def validate_no_missing(model: BaseModel):
