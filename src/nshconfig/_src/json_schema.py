@@ -177,6 +177,10 @@ def _convert_union(entry_name: str, alternatives: list) -> CodeResult:
             block_result += f"{inner.block}\n"
         nested_inlines.append(inner.inline)
 
+    # Remove duplicates from nested_inlines
+    nested_inlines = list(dict.fromkeys(nested_inlines))
+    if len(nested_inlines) == 1:
+        return CodeResult(block_result, nested_inlines[0])
     return CodeResult(block_result, " | ".join(nested_inlines))
 
 
@@ -210,6 +214,12 @@ def _convert_enum(entry_name: str, enum_values: list) -> CodeResult:
         else:
             raise ValueError(f"Unsupported enum value type: {type(value)}")
 
+    # Remove duplicates from literals
+    literals = list(dict.fromkeys(literals))
+    if len(literals) == 1:
+        return CodeResult("", literals[0])
+    if len(literals) == 0:
+        return CodeResult("", "typ.Never")
     return CodeResult("", " | ".join(literals))
 
 
@@ -268,9 +278,9 @@ def convert_schema(
     header: str | None = None,
 ) -> str:
     if root_name is None:
-        assert (
-            root_name := schema.get("title")
-        ) is not None, "root_name must be provided if schema has no title"
+        assert (root_name := schema.get("title")) is not None, (
+            "root_name must be provided if schema has no title"
+        )
 
     result = f"""from __future__ import annotations
 
