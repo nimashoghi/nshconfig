@@ -41,7 +41,7 @@ class CatConfig(AnimalConfig):
 
 # Create a config that uses the registry
 class ProgramConfig(C.Config):
-    animal: Annotated[AnimalConfig, animal_registry.DynamicResolution()]
+    animal: Annotated[AnimalConfig, animal_registry]
 
 # Use it!
 def main(program_config: ProgramConfig):

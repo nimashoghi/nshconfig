@@ -4,19 +4,20 @@ import dataclasses
 import logging
 import typing
 from collections.abc import Callable, Iterable
-from typing import Any, ClassVar, Generic, Literal, TypedDict, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypedDict, TypeVar, cast
 
-from pydantic import GetCoreSchemaHandler
+from pydantic import GetCoreSchemaHandler, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_core import core_schema
-from typing_extensions import assert_never
+from typing_extensions import assert_never, deprecated, override
 
-from .config import Config
+if TYPE_CHECKING:
+    from .config import Config
 
 log = logging.getLogger(__name__)
 
-TConfig = TypeVar("TConfig", bound=Config, covariant=True)
-TClass = TypeVar("TClass", bound=type[Config])
+TConfig = TypeVar("TConfig", bound="Config", covariant=True)
+TClass = TypeVar("TClass", bound="type[Config]")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -74,7 +75,7 @@ class RegistryConfig(TypedDict, total=False):
 
         auto_rebuild (bool):
             If True, the registry will automatically rebuild Pydantic models
-            that use the DynamicResolution type annotation whenever a new class
+            that use the registry type annotation whenever a new class
             is registered. This ensures that the model schema is always up-to-date
             with the registered classes. If False, the user must manually wrap
             parent pydantic models with the `@registry.rebuild_on_registers` decorator
@@ -83,6 +84,25 @@ class RegistryConfig(TypedDict, total=False):
 
     duplicate_tag_policy: Literal["warn-and-ignore", "warn-and-replace", "error"]
     auto_rebuild: bool
+
+
+def _no_configs_registered_invalid_config(registry: Registry) -> type[Config]:
+    if registry._invalid_cls is None:
+        from .config import Config
+
+        class NoConfigsRegisteredInvalidConfig(Config):
+            model_config = {"defer_build": True}
+
+            @model_validator(mode="before")
+            @classmethod
+            def invalidate(cls, data: Any) -> Any:
+                raise ValueError(
+                    f"No configs have been registered with registry {registry}."
+                )
+
+        registry._invalid_cls = NoConfigsRegisteredInvalidConfig
+
+    return registry._invalid_cls
 
 
 @dataclasses.dataclass
@@ -130,7 +150,7 @@ class Registry(Generic[TConfig]):
 
         @registry.rebuild_on_registers
         class ProgramConfig(Config):
-            animal: Annotated[AnimalBaseConfig, registry.DynamicResolution()]
+            animal: Annotated[AnimalBaseConfig, registry]
 
         # ^ With the above code, the `ProgramConfig` class will have a field `animal`
         # that can be any of the registered classes in the registry. Our implementation
@@ -173,6 +193,7 @@ class Registry(Generic[TConfig]):
     _on_register_callbacks: list[Callable[[type[Config]], None]] = dataclasses.field(
         default_factory=lambda: []
     )
+    _invalid_cls: type[Config] | None = None
 
     def _ref(
         self,
@@ -285,7 +306,7 @@ class Registry(Generic[TConfig]):
         class CatConfig(AnimalBaseConfig): ...
 
         class ProgramConfig(Config):
-            animal: Annotated[AnimalBaseConfig, registry.DynamicResolution()]
+            animal: Annotated[AnimalBaseConfig, registry]
 
         # This will work, since `DogConfig` is registered before the schema is built.
         print(ProgramConfig(animal=DogConfig(type="dog")))
@@ -325,7 +346,7 @@ class Registry(Generic[TConfig]):
 
         @registry.rebuild_on_registers
         class ProgramConfig(Config):
-            animal: Annotated[AnimalBaseConfig, registry.DynamicResolution()]
+            animal: Annotated[AnimalBaseConfig, registry]
 
         # This will work, since `DogConfig` is registered before the schema is built.
         print(ProgramConfig(animal=DogConfig(type="dog")))
@@ -402,10 +423,8 @@ class Registry(Generic[TConfig]):
         from pydantic import Field
 
         if not self._elements:
-            from .invalid import Invalid
-
             # If no elements are registered, just use the Invalid type.
-            t = Invalid
+            t = _no_configs_registered_invalid_config(self)
         else:
             # Construct the annotated union type.
             t = typing.Union[tuple(e.cls for e in self._elements)]
@@ -448,6 +467,10 @@ class Registry(Generic[TConfig]):
 
         print(output)
 
+
+    @deprecated(
+        "This method is deprecated. You can directly use the registry instance instead (e.g., Annotated[AnimalBase, registry]).",
+    )
     def DynamicResolution(self):
         """Create a type annotation that enables dynamic type resolution using this registry.
 
@@ -530,30 +553,29 @@ class Registry(Generic[TConfig]):
         ```
         """
 
-        registry = self
+        return self
 
-        class _RegistryTypeAnnotation:
-            __nshconfig_dynamic_resolution__: ClassVar = True
-            __nshconfig_registry__: ClassVar = registry
+    def __get_pydantic_core_schema__(
+        self,
+        source_type: Any,
+        handler: GetCoreSchemaHandler,
+    ) -> core_schema.CoreSchema:
+        return handler.generate_schema(self.type_hint())
 
-            @classmethod
-            def __get_pydantic_core_schema__(
-                cls,
-                source_type: Any,
-                handler: GetCoreSchemaHandler,
-            ) -> core_schema.CoreSchema:
-                return handler.generate_schema(cls.__nshconfig_registry__.type_hint())
 
-        return _RegistryTypeAnnotation
+def _extract_registry_from_annotation(annotation: Any):
+    if not isinstance(annotation, Registry):
+        return None
+    return annotation
 
 
 def _recursively_find_registry_annotations(typ: Any) -> list[Registry]:
     """Recursively find all registry annotations in a type, including in nested types.
 
     For example, this will find registry annotations in:
-    - Annotated[T, registry.DynamicResolution()]
-    - list[Annotated[T, registry.DynamicResolution()]]
-    - Dict[str, Annotated[T, registry.DynamicResolution()]]
+    - Annotated[T, registry]
+    - list[Annotated[T, registry]]
+    - Dict[str, Annotated[T, registry]]
     - etc.
 
     Args:
@@ -581,22 +603,6 @@ def _recursively_find_registry_annotations(typ: Any) -> list[Registry]:
             registries.extend(_recursively_find_registry_annotations(arg))
 
     return registries
-
-
-def _extract_registry_from_annotation(annotation: Any):
-    if (
-        not getattr(annotation, "__nshconfig_dynamic_resolution__", False)
-        or (registry := getattr(annotation, "__nshconfig_registry__", None)) is None
-    ):
-        return None
-
-    assert isinstance(registry, Registry), f"{registry} is not a Registry"
-
-    # If auto_rebuild is enabled, add the registry to the list
-    if not registry.config.get("auto_rebuild", True):
-        return None
-
-    return registry
 
 
 def extract_registries_from_field_info(field: FieldInfo):

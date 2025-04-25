@@ -18,7 +18,7 @@ def test_nested_annotation_case_from_nshtrainer():
 
     plugin_registry = C.Registry(PluginBaseConfig, discriminator="name")
     PluginConfig = TypeAliasType(  # type: ignore
-        "PluginConfig", Annotated[PluginBaseConfig, plugin_registry.DynamicResolution()]
+        "PluginConfig", Annotated[PluginBaseConfig, plugin_registry]
     )
 
     @plugin_registry.register

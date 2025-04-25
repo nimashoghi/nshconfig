@@ -21,7 +21,7 @@ def test_manual_rebuild_fail():
     @registry.rebuild_on_registers
     class Root(C.Config):
         a: int = 1
-        my_prop: list[Annotated[PropBase, registry.DynamicResolution()]]
+        my_prop: list[Annotated[PropBase, registry]]
 
     @registry.register
     class Prop1(PropBase):
@@ -54,7 +54,7 @@ def test_manual_rebuild():
     @registry.rebuild_on_registers
     class Root(C.Config):
         a: int = 1
-        my_prop: list[Annotated[PropBase, registry.DynamicResolution()]]
+        my_prop: list[Annotated[PropBase, registry]]
 
     @registry.register
     class Prop1(PropBase):
@@ -85,7 +85,7 @@ def test_auto_rebuild():
 
     class Root(C.Config):
         a: int = 1
-        my_prop: list[Annotated[PropBase, registry.DynamicResolution()]]
+        my_prop: list[Annotated[PropBase, registry]]
 
     @registry.register
     class Prop1(PropBase):
