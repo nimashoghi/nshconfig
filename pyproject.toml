@@ -40,7 +40,12 @@ deprecateTypingAliases = true
 strictListInference = true
 strictDictionaryInference = true
 strictSetInference = true
-reportPrivateImportUsage = false
+reportPrivateImportUsage = "none"
+reportMatchNotExhaustive = "warning"
+reportOverlappingOverload = "warning"
+reportUnnecessaryTypeIgnoreComment = "warning"
+reportImplicitOverride = "warning"
+reportIncompatibleMethodOverride = "information"
 
 [tool.ruff.lint]
 select = ["FA102", "FA100"]

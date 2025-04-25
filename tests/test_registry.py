@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 
 import pydantic
 import pytest
+from typing_extensions import override
 
 import nshconfig as C
 
@@ -29,6 +30,7 @@ def test_manual_rebuild_fail():
     class Prop1(PropBase):
         type: Literal["prop1"] = "prop1"
 
+        @override
         def my_method(self) -> None:
             pass
 
@@ -37,6 +39,7 @@ def test_manual_rebuild_fail():
     class Prop2(PropBase):
         type: Literal["prop2"] = "prop2"
 
+        @override
         def my_method(self) -> None:
             pass
 
@@ -62,6 +65,7 @@ def test_manual_rebuild():
     class Prop1(PropBase):
         type: Literal["prop1"] = "prop1"
 
+        @override
         def my_method(self) -> None:
             pass
 
@@ -71,6 +75,7 @@ def test_manual_rebuild():
     class Prop2(PropBase):
         type: Literal["prop2"] = "prop2"
 
+        @override
         def my_method(self) -> None:
             pass
 
@@ -93,6 +98,7 @@ def test_auto_rebuild():
     class Prop1(PropBase):
         type: Literal["prop1"] = "prop1"
 
+        @override
         def my_method(self) -> None:
             pass
 
@@ -102,6 +108,7 @@ def test_auto_rebuild():
     class Prop2(PropBase):
         type: Literal["prop2"] = "prop2"
 
+        @override
         def my_method(self) -> None:
             pass
 

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     try:
-        from treescope import renderers, rendering_parts  # type: ignore
+        from treescope import renderers, rendering_parts
     except ImportError:
         pass
 
