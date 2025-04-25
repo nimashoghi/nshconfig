@@ -12,3 +12,17 @@ from ._src.missing import AllowMissing as AllowMissing
 from ._src.missing import validate_no_missing as validate_no_missing
 from ._src.registry import Registry as Registry
 from ._src.registry import RegistryConfig as RegistryConfig
+
+try:
+    from importlib.metadata import PackageNotFoundError, version
+except ImportError:
+    # For Python <3.8
+    from importlib_metadata import (  # pyright: ignore[reportMissingImports]
+        PackageNotFoundError,
+        version,
+    )
+
+try:
+    __version__ = version(__name__)
+except PackageNotFoundError:
+    __version__ = "unknown"
