@@ -68,3 +68,14 @@ def test_config_hashable():
     assert len(config_list_dedup) == 2
     assert config_list_dedup[0] == config_list[0]
     assert config_list_dedup[1] == config_list[1]
+
+
+class MyConfigWithNonHashableProperty(C.Config):
+    model_config: ClassVar = {"set_default_hash": True}
+
+    prop: list[int] = [1, 2, 3]
+
+
+def test_config_with_non_hashable_property():
+    with pytest.raises(TypeError):
+        hash(MyConfigWithNonHashableProperty())
