@@ -2,12 +2,34 @@
 
 from __future__ import annotations
 
-from typing import Any, NamedTuple
+from dataclasses import dataclass, field
+from typing import Any
+
+from typing_extensions import override
 
 
-class CodeResult(NamedTuple):
+@dataclass(slots=True)
+class CodeImport:
+    module: str
+    name: str
+    alias: str | None = None
+
+    @override
+    def __str__(self) -> str:
+        if self.alias:
+            return f"from {self.module} import {self.name} as {self.alias}"
+        return f"from {self.module} import {self.name}"
+
+
+@dataclass(slots=True)
+class CodeResult:
     block: str
     inline: str
+    imports: list[CodeImport] = field(default_factory=lambda: [])
+
+    @classmethod
+    def empty(cls) -> CodeResult:
+        return cls("", "", [])
 
 
 def _cap(word: str) -> str:
@@ -37,13 +59,15 @@ def _convert_tuple_entry(entry_name: str, entry_value: dict) -> CodeResult:
     inner_results = []
     block_result = ""
 
+    result = CodeResult.empty()
     for i, item in enumerate(items):
-        inner = _convert_schema_entry(f"{entry_name}__item{i}", item)
+        inner = _convert_schema_entry(f"{entry_name}__item{i}", item, result)
         if inner.block:
-            block_result += f"{inner.block}\n"
+            result.block += f"{inner.block}\n"
         inner_results.append(inner.inline)
 
-    return CodeResult(block_result, f"tuple[{', '.join(inner_results)}]")
+    result.inline = f"tuple[{', '.join(inner_results)}]"
+    return result
 
 
 def _convert_array_entry(entry_name: str, entry_value: dict) -> CodeResult:
@@ -51,8 +75,10 @@ def _convert_array_entry(entry_name: str, entry_value: dict) -> CodeResult:
     if "prefixItems" in entry_value:
         return _convert_tuple_entry(entry_name, entry_value)
 
-    inner = _convert_schema_entry(f"{entry_name}__item", entry_value["items"])
-    return CodeResult(inner.block, f"list[{inner.inline}]")
+    result = CodeResult.empty()
+    inner = _convert_schema_entry(f"{entry_name}__item", entry_value["items"], result)
+    result.inline = f"list[{inner.inline}]"
+    return result
 
 
 def _merge_conditional_into(entry_value: dict, alternative: dict) -> None:
@@ -104,7 +130,7 @@ def _indent(text: str) -> str:
 
 def _convert_object_entry(entry_name: str, entry_value: dict) -> CodeResult:
     """Handles that are type = object"""
-    block_result = ""
+    result = CodeResult.empty()
 
     _merge_conditionals_into_main(entry_value)
 
@@ -125,6 +151,7 @@ def _convert_object_entry(entry_name: str, entry_value: dict) -> CodeResult:
     )  # ignore the schema field, as it's invalid syntax and not interesting
 
     type_name = _snake_case_to_pascal_case(entry_name)
+    result.inline = type_name
     is_total = len(required_fields) > len(properties) - len(required_fields)
 
     # Add class description if present
@@ -142,9 +169,13 @@ def _convert_object_entry(entry_name: str, entry_value: dict) -> CodeResult:
         typed_dict.append(_indent("pass"))
     else:
         for prop_name, prop_value in properties.items():
-            inner = _convert_schema_entry(f"{entry_name}__{prop_name}", prop_value)
+            inner = _convert_schema_entry(
+                f"{entry_name}__{prop_name}",
+                prop_value,
+                result,
+            )
             if inner.block:
-                block_result += f"{inner.block}\n"
+                result.block += f"{inner.block}\n"
 
             if (prop_name in required_fields) == is_total:
                 prop_inline = inner.inline
@@ -161,27 +192,65 @@ def _convert_object_entry(entry_name: str, entry_value: dict) -> CodeResult:
             typed_dict.append("")
 
     merged_dict = "\n".join(typed_dict)
-    block_result += f"{merged_dict}\n"
-    return CodeResult(block_result, type_name)
+    result.block += f"{merged_dict}\n"
+    return result
+
+
+def _convert_x_python(entry_name: str, entry_value: dict) -> CodeResult:
+    result = CodeResult.empty()
+    python_cls = entry_value["x-python-cls"]
+    assert isinstance(python_cls, str), (
+        f"Invalid entry at {entry_name}: x-python-cls must be a string ({python_cls})"
+    )
+    module, name = python_cls.rsplit(".", 1)
+
+    imp = CodeImport(module, name)
+    result.imports.append(imp)
+    result.inline = python_cls
+    return result
+
+
+def _convert_x_python_union(entry_name: str, entry_value: dict) -> CodeResult:
+    alternatives = entry_value["x-python-any-of"]
+    assert len(alternatives) == 2
+
+    result = CodeResult.empty()
+
+    model, python = alternatives
+    assert model["type"] != "x-python"
+    model_result = _convert_schema_entry(f"{entry_name}TypedDict", model, result)
+    result.block += model_result.block
+
+    assert python["type"] == "x-python"
+    python_result = _convert_schema_entry(entry_name, python, result)
+
+    if entry_value.get("x-python-any-of-disable-typed-dict-generation", False):
+        return python_result
+
+    result.block += python_result.block
+
+    result.inline = f"{model_result.inline} | {python_result.inline}"
+    return result
 
 
 def _convert_union(entry_name: str, alternatives: list) -> CodeResult:
-    block_result = ""
+    result = CodeResult.empty()
     nested_inlines = []
 
     single = len(alternatives) == 1
     for i, alternative in enumerate(alternatives):
         inner_name = entry_name if single else f"{entry_name}__any{i}"
-        inner = _convert_schema_entry(inner_name, alternative)
+        inner = _convert_schema_entry(inner_name, alternative, result)
         if inner.block:
-            block_result += f"{inner.block}\n"
+            result.block += f"{inner.block}\n"
         nested_inlines.append(inner.inline)
 
     # Remove duplicates from nested_inlines
     nested_inlines = list(dict.fromkeys(nested_inlines))
     if len(nested_inlines) == 1:
-        return CodeResult(block_result, nested_inlines[0])
-    return CodeResult(block_result, " | ".join(nested_inlines))
+        result.inline = nested_inlines[0]
+    result.inline = " | ".join(nested_inlines)
+    return result
 
 
 def _convert_any_of(entry_name: str, entry_value: dict) -> CodeResult:
@@ -223,7 +292,18 @@ def _convert_enum(entry_name: str, enum_values: list) -> CodeResult:
     return CodeResult("", " | ".join(literals))
 
 
-def _convert_schema_entry(entry_name: str, entry_value: dict) -> CodeResult:
+def _convert_schema_entry(
+    entry_name: str,
+    entry_value: dict,
+    result: CodeResult | None,
+) -> CodeResult:
+    new_result = _convert_schema_entry_worker(entry_name, entry_value)
+    if result is not None:
+        result.imports.extend(new_result.imports)
+    return new_result
+
+
+def _convert_schema_entry_worker(entry_name: str, entry_value: dict) -> CodeResult:
     if "$ref" in entry_value:
         if "#/$defs/" not in entry_value["$ref"]:
             msg = f"Invalid entry at {entry_name}: only $defs are supported in $ref ({entry_value})"
@@ -232,6 +312,9 @@ def _convert_schema_entry(entry_name: str, entry_value: dict) -> CodeResult:
 
     if "anyOf" in entry_value:
         return _convert_any_of(entry_name, entry_value)
+
+    if "x-python-any-of" in entry_value:
+        return _convert_x_python_union(entry_name, entry_value)
 
     if "oneOf" in entry_value:
         return _convert_one_of(entry_name, entry_value)
@@ -243,33 +326,37 @@ def _convert_schema_entry(entry_name: str, entry_value: dict) -> CodeResult:
         return CodeResult("", "typ.Any")
 
     entry_type = entry_value.get("type")
+    result = CodeResult.empty()
     match entry_type:
         case "string":
-            inline_result = "str"
+            result.inline = "str"
 
         case "integer":
-            inline_result = "int"
+            result.inline = "int"
 
         case "number":
-            inline_result = "float"
+            result.inline = "float"
 
         case "boolean":
-            inline_result = "bool"
+            result.inline = "bool"
 
         case "null":
-            inline_result = "None"
+            result.inline = "None"
 
         case "array":
-            return _convert_array_entry(entry_name, entry_value)
+            result = _convert_array_entry(entry_name, entry_value)
 
         case "object":
-            return _convert_object_entry(entry_name, entry_value)
+            result = _convert_object_entry(entry_name, entry_value)
+
+        case "x-python":
+            result = _convert_x_python(entry_name, entry_value)
 
         case _:
             msg = f"Invalid entry at {entry_name}: unknown type {entry_type}"
             raise ValueError(msg)
 
-    return CodeResult("", inline_result)
+    return result
 
 
 def convert_schema(
@@ -286,6 +373,8 @@ def convert_schema(
 
 import typing_extensions as typ
 
+<|ADDITIONAL_IMPORTS|>
+
 {header or ""}
 """
     # Add schema description if present
@@ -298,8 +387,11 @@ import typing_extensions as typ
     if defs:
         result += "\n# Definitions\n"
 
+    imports: list[str] = []
+
     for def_name, def_value in defs.items():
-        inner = _convert_schema_entry(def_name, def_value)
+        inner = _convert_schema_entry(def_name, def_value, None)
+        imports.extend(i.module for i in inner.imports)
 
         if inner.block:
             result += f"\n{inner.block}\n\n"
@@ -316,9 +408,10 @@ import typing_extensions as typ
 
     result += "\n\n# Schema entries\n"
 
-    root = _convert_schema_entry(root_name, schema)
+    root = _convert_schema_entry(root_name, schema, None)
     if root.block:
         result += root.block
+    imports.extend(i.module for i in root.imports)
 
     if root_name != root.inline:
         # Add root description if present and not already added
@@ -327,5 +420,9 @@ import typing_extensions as typ
             if root_description:
                 result += f'"""{root_description}"""\n'
         result += f'\n{root_name} = typ.TypeAliasType("{root_name}", {root.inline})\n'
+
+    imports = sorted(list(dict.fromkeys(imports)))
+    imports = [f"import {i}" for i in imports]
+    result = result.replace("<|ADDITIONAL_IMPORTS|>", "\n".join(imports))
 
     return result

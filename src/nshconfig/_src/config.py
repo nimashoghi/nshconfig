@@ -47,6 +47,13 @@ class ConfigDict(_ConfigDict, total=False):
     Defaults to `True`.
     """
 
+    disable_typed_dict_generation: bool
+    """
+    Whether to disable the generation of TypedDict classes for the config class.
+    If `True`, the `nshconfig-export` will not generate TypedDict classes for the config class.
+    Defaults to `False`.
+    """
+
 
 class DumpKwargs(TypedDict, total=False):
     include: IncEx | None
@@ -135,6 +142,7 @@ class Config(BaseModel, _MutableMappingBase):
         repr_diff_only=False,
         no_validate_assignment_for_draft=True,
         set_default_hash=True,
+        disable_typed_dict_generation=False,
     )
 
     if TYPE_CHECKING:

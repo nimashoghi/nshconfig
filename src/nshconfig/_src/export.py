@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import importlib
 import importlib.util
 import inspect
@@ -13,9 +14,10 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
-from typing_extensions import TypeAliasType
+from pydantic.json_schema import GenerateJsonSchema, JsonSchemaValue
+from typing_extensions import TypeAliasType, TypedDict, override
 
 from . import typing_inspect_ as typing_inspect
 from .config import Config
@@ -350,13 +352,96 @@ def _typed_dict_file_exports(class_name: str) -> list[str]:
     return sorted([typed_dict_name, f"Create{class_name}"])
 
 
+class _SchemaWithCls(TypedDict):
+    cls: type
+
+
+def _x_python_schema(schema: _SchemaWithCls):
+    return {
+        "type": "x-python",
+        "x-python-cls": f"{schema['cls'].__module__}.{schema['cls'].__name__}",
+    }
+
+
+def _resolve_model_config(cls: type, is_dataclass: bool):
+    """
+    Resolves the model config for the given class.
+    """
+    from pydantic import BaseModel
+
+    from .config import ConfigDict
+
+    if is_dataclass:
+        model_config = cast(
+            ConfigDict,
+            {
+                **getattr(cls, "__pydantic_config__", {}),
+                **getattr(cls, "__nshconfig_config__", {}),
+            },
+        )
+    else:
+        if not issubclass(cls, BaseModel):
+            raise TypeError(f"Expected a subclass of BaseModel, got {cls.__name__}")
+        model_config = cast(ConfigDict, cls.model_config)
+    return model_config
+
+
+def _x_python_any_of_schema(
+    json_schema: JsonSchemaValue,
+    schema: _SchemaWithCls,
+    is_dataclass: bool = False,
+):
+    any_json_schema: dict[str, Any] = {
+        "x-python-any-of": [json_schema, _x_python_schema(schema)],
+    }
+
+    # Resolve the model config for the given class
+    model_config = _resolve_model_config(schema["cls"], is_dataclass)
+    if model_config.get("disable_typed_dict_generation", False):
+        any_json_schema["x-python-any-of-disable-typed-dict-generation"] = True
+
+    return any_json_schema
+
+
+def _create_generate_json_schema_cls(root_cls: type[Config]):
+    """
+    Creates a custom GenerateJsonSchema class that adds the x-python
+    metadata to the JSON schema, except for the root class.
+    """
+
+    class MyGenerateJsonSchema(GenerateJsonSchema):
+        @override
+        def model_schema(self, schema):
+            json_schema = super().model_schema(schema)
+            if schema["cls"] is root_cls:
+                return json_schema
+
+            return _x_python_any_of_schema(json_schema, schema, is_dataclass=False)
+
+        @override
+        def dataclass_schema(self, schema):
+            json_schema = super().dataclass_schema(schema)
+            if schema["cls"] is root_cls:
+                return json_schema
+
+            return _x_python_any_of_schema(json_schema, schema, is_dataclass=True)
+
+        @override
+        def is_instance_schema(self, schema):
+            return _x_python_schema(schema)
+
+    return MyGenerateJsonSchema
+
+
 def _config_cls_to_typed_dict_code(config_cls: type[Config]) -> str:
     """
     Generates the TypedDict code for the given Config subclass.
     """
 
     # Convert the config cls to a JSON schema
-    schema = config_cls.model_json_schema()
+    schema = config_cls.model_json_schema(
+        schema_generator=_create_generate_json_schema_cls(config_cls)
+    )
 
     # Convert the JSON schema to TypedDict code
     imports = IMPORTS_TEMPLATE.format(
