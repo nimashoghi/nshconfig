@@ -21,3 +21,4 @@ lightning_integration
 - [MISSING Constant](missing_constant.md): Better handling of optional fields
 - [Invalid Config Type](invalid_config.md): Type-safe handling of impossible configuration states
 - [PyTorch Lightning Integration](lightning_integration.md): Seamless integration with PyTorch Lightning
+- [Hash Functionality](hash_functionality.md): Hashing for deduplication

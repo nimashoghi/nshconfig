@@ -174,3 +174,21 @@ def import_and_parse_python_module(module_name: str, config_cls: type[T]) -> T:
     """
     module = import_python_module(module_name)
     return parse_config_from_module(module, config_cls)
+
+
+def deduplicate_configs(configs: list[T]) -> list[T]:
+    """Deduplicate a list of configs.
+
+    Args:
+        configs: List of configs to deduplicate
+
+    Returns:
+        A new list with duplicates removed
+    """
+    seen = set()
+    unique_configs: list[T] = []
+    for config in configs:
+        if config not in seen:
+            seen.add(config)
+            unique_configs.append(config)
+    return unique_configs

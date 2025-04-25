@@ -38,6 +38,15 @@ class ConfigDict(_ConfigDict, total=False):
     Defaults to `True`.
     """
 
+    set_default_hash: bool
+    """
+    Whether to set the default hash function for the config class. By default,
+    Pydantic adds a `__hash__` method for frozen models, but Config classes are mutable,
+    so we don't get a hash function by default. Setting this to `True` will enable the hash function
+    for the config class, which is useful for using the config class as a key in a dictionary.
+    Defaults to `True`.
+    """
+
 
 class DumpKwargs(TypedDict, total=False):
     include: IncEx | None
@@ -112,7 +121,7 @@ class Config(BaseModel, _MutableMappingBase):
         ```
     """
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(  # type: ignore
+    model_config: ClassVar[ConfigDict] = ConfigDict(  # pyright: ignore[reportIncompatibleVariableOverride]
         validate_assignment=True,
         validate_return=True,
         validate_default=True,
@@ -122,6 +131,10 @@ class Config(BaseModel, _MutableMappingBase):
         extra="ignore",
         validation_error_cause=True,
         use_attribute_docstrings=True,
+        # Our custom config options
+        repr_diff_only=False,
+        no_validate_assignment_for_draft=True,
+        set_default_hash=True,
     )
 
     if TYPE_CHECKING:
@@ -134,6 +147,9 @@ class Config(BaseModel, _MutableMappingBase):
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs) -> None:
         super().__pydantic_init_subclass__(**kwargs)
+
+        if cls.model_config.get("set_default_hash", True):
+            _try_set_hash(cls)
 
         from .registry import Registry, extract_registries_from_field_info
 
@@ -729,3 +745,22 @@ def _get_schema_uri(cls: type[Config]) -> str | None:
         current_dir = current_dir.parent
 
     return None
+
+
+def _try_set_hash(cls: type[Config]):
+    # This is a bit of a hack as we're relying on Pydantic's internal API,
+    # but we can fail gracefully if it doesn't work.
+
+    try:
+        from pydantic._internal._model_construction import set_default_hash_func
+    except ImportError:
+        log.warning(
+            "Could not set default hash function for config class. "
+            "This is likely due to a Pydantic version that does not support this feature. "
+            "Please make sure you're using Pydantic >= 2.10. "
+            "If you are and still see this error, please report it to the nshconfig maintainers."
+        )
+        return
+
+    set_default_hash_func(cls, cls.__bases__)
+    log.info(f"Default hash function set for class: {cls.__name__}")
