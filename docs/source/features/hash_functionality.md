@@ -11,7 +11,7 @@ By default, all `Config` classes are made hashable through a mechanism that auto
 3. Add config instances to sets
 4. Deduplicate configs easily using `dict.fromkeys` or sets
 
-This is particularly useful when you need to store and retrieve configs in dictionaries or sets, or when you need to deduplicate a list of configs.
+This is particularly useful when you need to store and retrieve configs in dictionaries or sets.
 
 ## How It Works
 
@@ -50,9 +50,9 @@ assert config_map[config1] == "First config"
 # Since config2 is equal to config1, it has the same hash and can retrieve the same value
 assert config_map[config2] == "First config"
 
-# Deduplicating configs
+# Deduplicating configs using sets
 configs = [config1, config2, config3, MyConfig(name="example", value=42)]
-unique_configs = list(dict.fromkeys(configs))
+unique_configs = list(set(configs))
 assert len(unique_configs) == 2  # Only 2 unique configs (config1/config2 and config3)
 ```
 
@@ -78,21 +78,6 @@ With this configuration, attempting to hash an instance of `NonHashableConfig` w
 1. **Mutability Warning**: Since `Config` objects are mutable, you should be careful when using them as dictionary keys. If you modify a config after using it as a key, you may not be able to retrieve its associated value anymore, as the hash will change.
 
 2. **Nested Configs**: For configs containing other configs, all nested configs must also be hashable for the parent config to be hashable.
-
-## Use with Deduplication
-
-The automatic hash functionality enables easy deduplication of configs using the `deduplicate_configs` utility function:
-
-```python
-from nshconfig import deduplicate_configs
-
-# Create some potentially duplicate configs
-configs = [MyConfig(), MyConfig(), MyConfig(name="different")]
-
-# Deduplicate them
-unique_configs = deduplicate_configs(configs)
-# unique_configs now contains only 2 configs
-```
 
 ## Implementation Details
 

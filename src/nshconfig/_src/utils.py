@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 import sys
 from collections.abc import Iterable
 from contextlib import contextmanager
@@ -11,6 +12,8 @@ from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
     from .config import Config
+
+log = logging.getLogger(__name__)
 
 # Use string literal type annotation to avoid circular import
 TConfig = TypeVar("TConfig", bound="Config", infer_variance=True)
@@ -195,12 +198,20 @@ def deduplicate(values: Iterable[T]) -> list[T]:
     Returns:
         A new list with duplicates removed
     """
-    seen = set()
+    seen: list[T] = []
     unique_configs: list[T] = []
+    num_configs = 0
     for config in values:
-        if config not in seen:
-            seen.add(config)
-            unique_configs.append(config)
+        num_configs += 1
+        if any(config == seen_config for seen_config in seen):
+            continue
+
+        seen.append(config)
+        unique_configs.append(config)
+
+    if len(unique_configs) != num_configs:
+        log.critical(f"Removed {num_configs - len(unique_configs)} duplicates")
+
     return unique_configs
 
 
