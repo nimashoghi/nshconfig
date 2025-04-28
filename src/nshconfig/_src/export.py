@@ -596,11 +596,14 @@ def _find_modules(module_name: str, recursive: bool, ignore_modules: list[str]):
     if not recursive:
         return modules
 
-    # Find the directory containing the module
+    # Determine module directories (handle namespace packages)
     if spec.origin is None:
-        return modules
-
-    module_dir = Path(spec.origin).parent
+        # Namespace package: gather search locations
+        module_dirs: list[Path] = [
+            Path(p) for p in (spec.submodule_search_locations or [])
+        ]
+    else:
+        module_dirs = [Path(spec.origin).parent]
 
     def add_module(path: Path, base_module: str):
         relative_path = path.relative_to(module_dir)
@@ -618,14 +621,20 @@ def _find_modules(module_name: str, recursive: bool, ignore_modules: list[str]):
         else:
             log.debug(f"Ignoring module {full_module_name}")
 
-    # Walk through the directory
-    for file_path in module_dir.rglob("*.py"):
-        if file_path.name == "__init__.py":
-            # This is a package, add it
-            add_module(file_path, module_name)
-        elif not any(parent.name == "__init__.py" for parent in file_path.parents):
-            # This is a standalone Python file not within a package, add it
-            add_module(file_path, module_name)
+    # Walk through all module directories
+    for module_dir in module_dirs:
+        for file_path in module_dir.rglob("*.py"):
+            # Skip __pycache__ directories
+            if "__pycache__" in file_path.parts:
+                continue
+
+            if file_path.name == "__init__.py":
+                # This is a package, add it
+                add_module(file_path, module_name)
+            else:
+                # Add all Python files, whether they're in a package or not
+                # This handles namespace packages (directories without __init__.py)
+                add_module(file_path, module_name)
 
     return modules
 
