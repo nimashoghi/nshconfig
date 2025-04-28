@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import importlib
 import importlib.util
 import inspect
@@ -23,6 +22,8 @@ from . import typing_inspect_ as typing_inspect
 from .config import Config
 from .json_schema import convert_schema
 from .registry import Registry
+
+log = logging.getLogger(__name__)
 
 CODEGEN_MARKER = "__codegen__ = True"
 
@@ -185,11 +186,11 @@ def export_main():
         # Set up logging
         level = logging.DEBUG if verbose else logging.INFO
         logging.basicConfig(level=level)
-        logging.debug(f"Arguments: {args}")
+        log.debug(f"Arguments: {args}")
 
         # Just remove the output directory if remove_existing is True
         if remove_existing and output.exists():
-            logging.critical(f"Removing existing output directory {output}")
+            log.critical(f"Removing existing output directory {output}")
             if output.is_dir():
                 shutil.rmtree(output)
             else:
@@ -204,17 +205,17 @@ def export_main():
         registry_dict = defaultdict[str, set[str]](set)
         for module_name in modules:
             if _is_generated_module(module_name):
-                logging.debug(f"Skipping generated module {module_name}")
+                log.debug(f"Skipping generated module {module_name}")
                 continue
 
-            logging.debug(f"Exporting configurations from {module_name}")
+            log.debug(f"Exporting configurations from {module_name}")
             for config_cls in _module_configs(
                 module_name,
                 ignore_abc,
                 export_generics,
                 module,
             ):
-                logging.debug(f"Exporting {config_cls}")
+                log.debug(f"Exporting {config_cls}")
                 config_cls_dict[module_name].add(config_cls)
 
             for name, obj in _alias_configs(
@@ -590,7 +591,7 @@ def _find_modules(module_name: str, recursive: bool, ignore_modules: list[str]):
     ) and not _is_generated_module(module_name):
         modules.append(module_name)
     else:
-        logging.debug(f"Ignoring module {module_name}")
+        log.debug(f"Ignoring module {module_name}")
 
     if not recursive:
         return modules
@@ -615,7 +616,7 @@ def _find_modules(module_name: str, recursive: bool, ignore_modules: list[str]):
         if not any(full_module_name.startswith(ignore) for ignore in ignore_modules):
             modules.append(full_module_name)
         else:
-            logging.debug(f"Ignoring module {full_module_name}")
+            log.debug(f"Ignoring module {full_module_name}")
 
     # Walk through the directory
     for file_path in module_dir.rglob("*.py"):
@@ -728,7 +729,9 @@ def _module_configs(
 
     # Find all subclasses of Config
     for _, cls in inspect.getmembers(module, inspect.isclass):
-        if _should_export(cls, ignore_abc, export_generics, root_module):
+        should_export = _should_export(cls, ignore_abc, export_generics, root_module)
+        log.debug(f"Checking {cls=}... {should_export=}")
+        if should_export:
             yield cls
 
 
