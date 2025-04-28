@@ -1,0 +1,18 @@
+{
+    "properties": {
+        "hidden_size": {
+            "title": "Hidden Size",
+            "type": "integer"
+        },
+        "num_layers": {
+            "title": "Num Layers",
+            "type": "integer"
+        }
+    },
+    "required": [
+        "hidden_size",
+        "num_layers"
+    ],
+    "title": "ModelConfig",
+    "type": "object"
+}

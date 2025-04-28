@@ -22,21 +22,88 @@ This will:
 
 ## Features
 
-### Type-Safe Exports
+For the demonstration of the features, we will use the following example Python module structure:
 
-The codegen tool automatically creates a clean export hierarchy that maintains your module structure:
+- `/`
+  - `my_module/`
+    - `configs/`
+      - `model.py`
 
+**`my_module/configs/model.py`**
 ```python
-# Original: my_module/configs/model.py
-class ModelConfig(Config):
+from __future__ import annotations
+
+import nshconfig as C
+
+
+class ModelConfig(C.Config):
     hidden_size: int
     num_layers: int
+```
 
-# Generated: exported_configs/configs/model.py
-from my_module.configs.model import ModelConfig
+Please see the `exmaples/config_codegen` directory for a complete example.
 
-# Your code can now import from the generated interface:
-from exported_configs.configs.model import ModelConfig
+### Type-Safe Exports
+
+The codegen tool automatically creates a clean export hierarchy that maintains your module structure. When we run the following command on the example module:
+
+```bash
+nshconfig-export my_module -o exported_configs
+```
+
+It generates the following directory structure:
+
+- `/`
+  - `exported_configs/`
+    - `__init__.py`
+    - `configs/`
+      - `__init__.py`
+      - `model/`
+        - `__init__.py`
+
+**`exported_configs/__init__.py`**
+```python
+from __future__ import annotations
+
+__codegen__ = True
+
+from my_module.configs.model import ModelConfig as ModelConfig
+
+from . import configs as configs
+
+__all__ = [
+    "ModelConfig",
+    "configs",
+]
+```
+
+**`exported_configs/configs/__init__.py`**
+```python
+from __future__ import annotations
+
+__codegen__ = True
+
+from my_module.configs.model import ModelConfig as ModelConfig
+
+from . import model as model
+
+__all__ = [
+    "ModelConfig",
+    "model",
+]
+```
+
+**`exported_configs/configs/model/__init__.py`**
+```python
+from __future__ import annotations
+
+__codegen__ = True
+
+from my_module.configs.model import ModelConfig as ModelConfig
+
+__all__ = [
+    "ModelConfig",
+]
 ```
 
 ### TypedDict Generation
@@ -44,30 +111,123 @@ from exported_configs.configs.model import ModelConfig
 With the `--generate-typed-dicts` flag, nshconfig generates TypedDict versions of your configurations along with type-safe creator functions:
 
 ```bash
-nshconfig-export my_module -o exported_configs --generate-typed-dicts
+nshconfig-export my_module -o exported_configs_typed_dict --generate-typed-dicts
 ```
 
-This creates TypedDict definitions that mirror your Config classes:
+This creates a `TypedDict` version of your configuration class, allowing you to use it as a type-safe dictionary. Below is the directory structure generated from the above command:
 
+
+- `/`
+  - `exported_configs_typed_dict/`
+    - `__init__.py`
+    - `configs/`
+      - `__init__.py`
+      - `model/`
+        - `ModelConfig_typed_dict.py`
+        - `__init__.py`
+
+**`exported_configs_typed_dict/__init__.py`**
 ```python
-# Original Config
-class ModelConfig(Config):
+from __future__ import annotations
+
+__codegen__ = True
+
+from my_module.configs.model import ModelConfig as ModelConfig
+
+from . import configs as configs
+from .configs.model.ModelConfig_typed_dict import CreateModelConfig as CreateModelConfig
+from .configs.model.ModelConfig_typed_dict import (
+    ModelConfigTypedDict as ModelConfigTypedDict,
+)
+
+__all__ = [
+    "CreateModelConfig",
+    "ModelConfig",
+    "ModelConfigTypedDict",
+    "configs",
+]
+```
+
+**`exported_configs_typed_dict/configs/__init__.py`**
+```python
+from __future__ import annotations
+
+__codegen__ = True
+
+from my_module.configs.model import ModelConfig as ModelConfig
+
+from . import model as model
+from .model.ModelConfig_typed_dict import CreateModelConfig as CreateModelConfig
+from .model.ModelConfig_typed_dict import ModelConfigTypedDict as ModelConfigTypedDict
+
+__all__ = [
+    "CreateModelConfig",
+    "ModelConfig",
+    "ModelConfigTypedDict",
+    "model",
+]
+```
+
+**`exported_configs_typed_dict/configs/model/ModelConfig_typed_dict.py`**
+```python
+from __future__ import annotations
+
+import typing_extensions as typ
+
+if typ.TYPE_CHECKING:
+    from my_module.configs.model import ModelConfig
+
+
+__codegen__ = True
+
+
+# Schema entries
+class ModelConfigTypedDict(typ.TypedDict):
     hidden_size: int
+
     num_layers: int
 
-# Generated TypedDict
-class ModelConfigTypedDict(TypedDict):
-    hidden_size: int
-    num_layers: int
 
-# Generated creator functions
-def CreateModelConfig(
-    dict: ModelConfigTypedDict, /  # Positional only dict argument
-) -> ModelConfig: ...
+@typ.overload
+def CreateModelConfig(**dict: typ.Unpack[ModelConfigTypedDict]) -> ModelConfig: ...
 
-def CreateModelConfig(
-    **dict: Unpack[ModelConfigTypedDict]  # Keyword arguments
-) -> ModelConfig: ...
+
+@typ.overload
+def CreateModelConfig(data: ModelConfigTypedDict | ModelConfig, /) -> ModelConfig: ...
+
+
+def CreateModelConfig(*args, **kwargs):
+    from my_module.configs.model import ModelConfig
+
+    if not args and kwargs:
+        # Called with keyword arguments
+        return ModelConfig.from_dict(kwargs)
+    elif len(args) == 1:
+        return ModelConfig.from_dict_or_instance(args[0])
+    else:
+        raise TypeError(
+            f"CreateModelConfig accepts either a ModelConfigTypedDict, "
+            f"keyword arguments, or a ModelConfig instance"
+        )
+```
+
+**`exported_configs_typed_dict/configs/model/__init__.py`**
+```python
+from __future__ import annotations
+
+__codegen__ = True
+
+from my_module.configs.model import ModelConfig as ModelConfig
+
+from .ModelConfig_typed_dict import CreateModelConfig as CreateModelConfig
+from .ModelConfig_typed_dict import ModelConfigTypedDict as ModelConfigTypedDict
+
+__all__ = [
+    "CreateModelConfig",
+    "ModelConfig",
+    "ModelConfigTypedDict",
+]
+
 ```
 
 You can use these definitions in several ways:
@@ -96,7 +256,7 @@ config3 = ModelConfig(hidden_size=256, num_layers=4)
 With the `--generate-json-schema` flag, nshconfig generates JSON schemas for your configurations:
 
 ```bash
-nshconfig-export my_module -o exported_configs --generate-json-schema
+nshconfig-export my_module -o exported_configs_json --generate-json-schema
 ```
 
 This creates `.schema.json` files that can be used for:
@@ -104,6 +264,84 @@ This creates `.schema.json` files that can be used for:
 - API documentation
 - IDE support for JSON/YAML files
 - Integration with other tools
+
+Running the above command will generate a directory structure like this:
+
+- `/`
+  - `exported_configs_json/`
+    - `__init__.py`
+    - `configs/`
+      - `__init__.py`
+      - `model/`
+        - `ModelConfig.schema.json`
+        - `__init__.py`
+
+**`exported_configs_json/__init__.py`**
+```python
+from __future__ import annotations
+
+__codegen__ = True
+
+from my_module.configs.model import ModelConfig as ModelConfig
+
+from . import configs as configs
+
+__all__ = [
+    "ModelConfig",
+    "configs",
+]
+```
+
+**`exported_configs_json/configs/__init__.py`**
+```python
+from __future__ import annotations
+
+__codegen__ = True
+
+from my_module.configs.model import ModelConfig as ModelConfig
+
+from . import model as model
+
+__all__ = [
+    "ModelConfig",
+    "model",
+]
+```
+
+**`exported_configs_json/configs/model/ModelConfig.schema.json`**
+```json
+{
+    "properties": {
+        "hidden_size": {
+            "title": "Hidden Size",
+            "type": "integer"
+        },
+        "num_layers": {
+            "title": "Num Layers",
+            "type": "integer"
+        }
+    },
+    "required": [
+        "hidden_size",
+        "num_layers"
+    ],
+    "title": "ModelConfig",
+    "type": "object"
+}
+```
+
+**`exported_configs_json/configs/model/__init__.py`**
+```python
+from __future__ import annotations
+
+__codegen__ = True
+
+from my_module.configs.model import ModelConfig as ModelConfig
+
+__all__ = [
+    "ModelConfig",
+]
+```
 
 ## Command Line Options
 
