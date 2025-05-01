@@ -21,7 +21,7 @@ def test_to_json_str(sample_config):
     assert data["value"] == 42
 
 
-def test_from_json_str(sample_config):
+def test_from_json_str():
     """Test creating config from JSON string."""
     json_str = json.dumps({"name": "test", "value": 42})
     config = SampleConfig.from_json_str(json_str)

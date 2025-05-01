@@ -64,7 +64,7 @@ def test_yaml_file_roundtrip(sample_config):
 
 
 @requires_yaml
-def test_from_yaml_str(sample_config):
+def test_from_yaml_str():
     """Test creating config from YAML string."""
     yaml_str = """
     name: test
