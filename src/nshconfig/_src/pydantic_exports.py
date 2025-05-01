@@ -46,7 +46,7 @@ from pydantic import PydanticInvalidForJsonSchema as PydanticInvalidForJsonSchem
 from pydantic import PydanticForbiddenQualifier as PydanticForbiddenQualifier
 
 # fields
-# from pydantic import Field as Field # We have our own version of this.
+from pydantic import Field as Field
 from pydantic import computed_field as computed_field
 from pydantic import PrivateAttr as PrivateAttr
 
