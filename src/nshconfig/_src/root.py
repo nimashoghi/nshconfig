@@ -107,9 +107,9 @@ class RootConfig(BaseSettings, Config):
         cli_exit_on_error=True,
         cli_prefix="",
         cli_flag_prefix_char="-",
-        cli_implicit_flags=False,
+        cli_implicit_flags=True,
         cli_ignore_unknown_args=False,
-        cli_kebab_case=False,
+        cli_kebab_case=True,
         json_file=None,
         json_file_encoding=None,
         yaml_file=None,
@@ -428,15 +428,6 @@ class CLI:
 
             class CliAppBaseSettings(RootConfig, model_cls):  # pyright: ignore[reportIncompatibleVariableOverride]
                 __doc__ = model_cls.__doc__
-                model_config = RootConfigDict(
-                    nested_model_default_partial_update=True,
-                    case_sensitive=True,
-                    cli_hide_none_type=True,
-                    cli_avoid_json=True,
-                    cli_enforce_required=True,
-                    cli_implicit_flags=True,
-                    cli_kebab_case=True,
-                )
 
             model = CliAppBaseSettings.auto_init(**model_init_data)
             model_init_data = {}
