@@ -12,6 +12,10 @@ from ._src.missing import validate_no_missing as validate_no_missing
 from ._src.pydantic_exports import *
 from ._src.registry import Registry as Registry
 from ._src.registry import RegistryConfig as RegistryConfig
+from ._src.root import CLI as CLI
+from ._src.root import CliApp as CliApp
+from ._src.root import RootConfig as RootConfig
+from ._src.root import RootConfigDict as RootConfigDict
 from ._src.utils import deduplicate as deduplicate
 from ._src.utils import deduplicate_configs as deduplicate_configs
 

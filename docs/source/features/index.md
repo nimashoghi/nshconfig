@@ -10,6 +10,7 @@ config_codegen
 missing_constant
 invalid_config
 lightning_integration
+root_config_cli
 ```
 
 `nshconfig` comes with several powerful features:
@@ -21,5 +22,6 @@ lightning_integration
 - [MISSING Constant](missing_constant.md): Better handling of optional fields
 - [Invalid Config Type](invalid_config.md): Type-safe handling of impossible configuration states
 - [PyTorch Lightning Integration](lightning_integration.md): Seamless integration with PyTorch Lightning
+- [RootConfig & CLI Integration](root_config_cli.md): Load settings from multiple sources and build CLI apps
 - [Deduplication](deduplication.md): Deduplicate configurations easily
 - [Hash Functionality](hash_functionality.md): Hashing for deduplication

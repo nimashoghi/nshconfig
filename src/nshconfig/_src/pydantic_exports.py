@@ -178,3 +178,44 @@ from pydantic import FieldSerializationInfo as FieldSerializationInfo
 from pydantic import SerializerFunctionWrapHandler as SerializerFunctionWrapHandler
 from pydantic import OnErrorOmit as OnErrorOmit
 # endregion
+
+# region Pydantic Settings Exports
+# full module export
+import pydantic_settings as pydantic_settings
+
+from pydantic_settings import CLI_SUPPRESS as CLI_SUPPRESS
+from pydantic_settings import (
+    AWSSecretsManagerSettingsSource as AWSSecretsManagerSettingsSource,
+)
+from pydantic_settings import AzureKeyVaultSettingsSource as AzureKeyVaultSettingsSource
+
+# from pydantic_settings import BaseSettings as BaseSettings # We have our own version of this (RootConfig).
+# from pydantic_settings import CliApp as CliApp # We have our own version of this.
+from pydantic_settings import CliExplicitFlag as CliExplicitFlag
+from pydantic_settings import CliImplicitFlag as CliImplicitFlag
+from pydantic_settings import CliMutuallyExclusiveGroup as CliMutuallyExclusiveGroup
+from pydantic_settings import CliPositionalArg as CliPositionalArg
+from pydantic_settings import CliSettingsSource as CliSettingsSource
+from pydantic_settings import CliSubCommand as CliSubCommand
+from pydantic_settings import CliSuppress as CliSuppress
+from pydantic_settings import CliUnknownArgs as CliUnknownArgs
+from pydantic_settings import DotEnvSettingsSource as DotEnvSettingsSource
+from pydantic_settings import EnvSettingsSource as EnvSettingsSource
+from pydantic_settings import ForceDecode as ForceDecode
+from pydantic_settings import (
+    GoogleSecretManagerSettingsSource as GoogleSecretManagerSettingsSource,
+)
+from pydantic_settings import InitSettingsSource as InitSettingsSource
+from pydantic_settings import JsonConfigSettingsSource as JsonConfigSettingsSource
+from pydantic_settings import NoDecode as NoDecode
+from pydantic_settings import PydanticBaseSettingsSource as PydanticBaseSettingsSource
+from pydantic_settings import (
+    PyprojectTomlConfigSettingsSource as PyprojectTomlConfigSettingsSource,
+)
+from pydantic_settings import SecretsSettingsSource as SecretsSettingsSource
+from pydantic_settings import SettingsConfigDict as SettingsConfigDict
+from pydantic_settings import SettingsError as SettingsError
+from pydantic_settings import TomlConfigSettingsSource as TomlConfigSettingsSource
+from pydantic_settings import YamlConfigSettingsSource as YamlConfigSettingsSource
+from pydantic_settings import get_subcommand as get_subcommand
+# endregion

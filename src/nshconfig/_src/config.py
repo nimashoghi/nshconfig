@@ -5,6 +5,7 @@ import copy
 import importlib.util
 import json
 import logging
+import typing
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, get_origin, overload
@@ -818,6 +819,53 @@ class Config(BaseModel, _MutableMappingBase):
         """
         toml_str = Path(path).read_text()
         return cls.from_toml_str(toml_str)
+
+    # region CLI
+    # We're just adding this so `cli_cmd` override is visible in the IDE.
+    if TYPE_CHECKING:
+
+        def cli_cmd(self) -> None | Awaitable[None]:
+            """
+            The command to run the CLI. If this is implemented, the CLI will be run with this command.
+            """
+            raise NotImplementedError
+
+    def cli_run_subcommand(self) -> Config:
+        from pydantic_settings import CliApp
+
+        return CliApp.run_subcommand(self)
+
+    @classmethod
+    def cli_available_subcommands(cls) -> list[str]:
+        from pydantic_settings import CliSubCommand
+
+        _CliSubCommand = typing.get_args(CliSubCommand)[-1]
+
+        return [
+            field_name
+            for field_name, field_info in cls.model_fields.items()
+            if _CliSubCommand in field_info.metadata
+        ]
+
+    def cli_active_subcommand(self) -> str | None:
+        """
+        The active subcommand. This is set by the CLI when the config is created.
+        """
+        from pydantic_settings import CliSubCommand
+
+        _CliSubCommand = typing.get_args(CliSubCommand)[-1]
+
+        return next(
+            (
+                field_name
+                for field_name, field_info in type(self).model_fields.items()
+                if _CliSubCommand in field_info.metadata
+                and getattr(self, field_name) is not None
+            ),
+            None,
+        )
+
+    # endregion
 
 
 def _get_schema_uri(cls: type[Config]) -> str | None:
