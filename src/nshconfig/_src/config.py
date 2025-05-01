@@ -587,7 +587,8 @@ class Config(BaseModel, _MutableMappingBase):
             raise ImportError(
                 "Pydantic-yaml is required for YAML support. "
                 "You can either install nshconfig with "
-                "all extras using 'pip install nshconfig[extra]"
+                "all extras using 'pip install nshconfig[extra]'"
+                ", install the yaml extra via 'pip install nshconfig[yaml]'"
                 ", or install with 'pip install pydantic-yaml'"
             )
 
@@ -646,7 +647,8 @@ class Config(BaseModel, _MutableMappingBase):
             raise ImportError(
                 "Pydantic-yaml is required for YAML support. "
                 "You can either install nshconfig with "
-                "all extras using 'pip install nshconfig[extra]"
+                "all extras using 'pip install nshconfig[extra]'"
+                ", install the yaml extra via 'pip install nshconfig[yaml]'"
                 ", or install with 'pip install pydantic-yaml'"
             )
 
@@ -671,7 +673,8 @@ class Config(BaseModel, _MutableMappingBase):
             raise ImportError(
                 "Pydantic-yaml is required for YAML support. "
                 "You can either install nshconfig with "
-                "all extras using 'pip install nshconfig[extra]"
+                "all extras using 'pip install nshconfig[extra]'"
+                ", install the yaml extra via 'pip install nshconfig[yaml]'"
                 ", or install with 'pip install pydantic-yaml'"
             )
 
@@ -747,7 +750,8 @@ class Config(BaseModel, _MutableMappingBase):
             raise ImportError(
                 "Tomli-w is required for TOML support. "
                 "You can either install nshconfig with "
-                "all extras using 'pip install nshconfig[extra]"
+                "all extras using 'pip install nshconfig[extra]'"
+                ", install the w extra via 'pip install nshconfig[toml]'"
                 ", or install with 'pip install tomli-w'"
             )
 
@@ -803,7 +807,8 @@ class Config(BaseModel, _MutableMappingBase):
             raise ImportError(
                 "Tomli is required for TOML support. "
                 "You can either install nshconfig with "
-                "all extras using 'pip install nshconfig[extra]"
+                "all extras using 'pip install nshconfig[extra]'"
+                ", install the tomli extra via 'pip install nshconfig[toml]'"
                 ", or install with 'pip install tomli'"
             )
 
