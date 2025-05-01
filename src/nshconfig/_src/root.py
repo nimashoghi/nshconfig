@@ -13,13 +13,14 @@ from pydantic._internal._signature import _field_name_for_signature
 from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
+    PydanticBaseSettingsSource,
     SettingsConfigDict,
     SettingsError,
     get_subcommand,
 )
 from pydantic_settings.sources import ENV_FILE_SENTINEL, DotenvType, PathType
 from pydantic_settings.sources.types import PydanticModel
-from typing_extensions import TypeVar, override
+from typing_extensions import Self, TypeVar, override
 
 from .config import Config, ConfigDict
 
@@ -58,6 +59,19 @@ class RootConfigDict(ConfigDict, SettingsConfigDict, total=False):
     it is disabled by default.
 
     Default: False
+    """
+
+    auto_set_sources_from_model_config: bool
+    """If True, analyzes the current RootConfig class' model config and adds
+    additional SettingsSources depending on the model config. Specifically, it:
+
+    - Adds `JsonConfigSettingsSource` if `json_file` is set in the model config.
+    - Adds `YamlConfigSettingsSource` if `yaml_file` is set in the model config.
+    - Adds `TomlConfigSettingsSource` if `toml_file` is set in the model config.
+    - Adds `PyprojectTomlConfigSettingsSource` if `pyproject_toml_table_header`
+        is set in the model config.
+
+    Default: True
     """
 
 
@@ -116,6 +130,7 @@ class RootConfig(BaseSettings, Config):
         # Custom RootConfig options
         unset_magic_init_method=True,
         respect_pydantic_settings_callers=False,
+        auto_set_sources_from_model_config=True,
     )
 
     if not TYPE_CHECKING:
@@ -169,6 +184,53 @@ class RootConfig(BaseSettings, Config):
                 "skipping BaseSettings magic initialization"
             )
             super(BaseSettings, self).__init__(**data)
+
+    @override
+    @classmethod
+    def settings_customise_sources(  # pyright: ignore[reportIncompatibleMethodOverride]
+        cls,
+        settings_cls: type[Self],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        t = super().settings_customise_sources(
+            settings_cls,
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+        )
+
+        # If the model config has `auto_set_sources_from_model_config` set to True,
+        # we want to add the additional settings sources based on the model config.
+        if not settings_cls.model_config.get(
+            "auto_set_sources_from_model_config", True
+        ):
+            return t
+
+        if settings_cls.model_config.get("json_file"):
+            from pydantic_settings import JsonConfigSettingsSource
+
+            t = (JsonConfigSettingsSource(settings_cls),) + t
+
+        if settings_cls.model_config.get("yaml_file"):
+            from pydantic_settings import YamlConfigSettingsSource
+
+            t = (YamlConfigSettingsSource(settings_cls),) + t
+
+        if settings_cls.model_config.get("toml_file"):
+            from pydantic_settings import TomlConfigSettingsSource
+
+            t = (TomlConfigSettingsSource(settings_cls),) + t
+
+        if settings_cls.model_config.get("pyproject_toml_table_header"):
+            from pydantic_settings import PyprojectTomlConfigSettingsSource
+
+            t = (PyprojectTomlConfigSettingsSource(settings_cls),) + t
+
+        return t
 
     @classmethod
     def auto_init(
