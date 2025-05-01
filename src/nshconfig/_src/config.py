@@ -721,6 +721,104 @@ class Config(BaseModel, _MutableMappingBase):
 
     # endregion
 
+    def to_toml_str(
+        self,
+        /,
+        indent: int = 4,
+        multiline_strings: bool = False,
+        **kwargs: Unpack[DumpKwargs],
+    ) -> str:
+        """Dump configuration to a TOML string.
+
+        Args:
+            indent: Number of spaces to use for indentation
+            multiline_strings: Whether to use multiline strings
+            kwargs: Additional keyword arguments to pass to the TOML dumper,
+                these are parameters directly passed to cls.model_dump_json().
+
+        Raises:
+            ImportError: If pydantic-yaml is not installed
+        """
+
+        try:
+            from tomli_w import dumps
+        except ImportError:
+            raise ImportError(
+                "Tomli-w is required for TOML support. "
+                "You can either install nshconfig with "
+                "all extras using 'pip install nshconfig[extra]"
+                ", or install with 'pip install tomli-w'"
+            )
+
+        # We need to convert the config to a dict first
+        config_dict = self.model_dump(**kwargs)
+
+        # Then we can use tomli_w to dump the dict to a TOML string
+        toml_str = dumps(
+            config_dict, indent=indent, multiline_strings=multiline_strings
+        )
+        return toml_str
+
+    def to_toml_file(
+        self,
+        /,
+        path: str | Path,
+        indent: int = 4,
+        multiline_strings: bool = False,
+        **kwargs: Unpack[DumpKwargs],
+    ) -> None:
+        """Dump configuration to a TOML file.
+
+        Args:
+            path: Path to the TOML file
+            indent: Number of spaces to use for indentation
+            multiline_strings: Whether to use multiline strings
+            kwargs: Additional keyword arguments to pass to the TOML dumper,
+                these are parameters directly passed to cls.model_dump_json().
+        """
+        toml_str = self.to_toml_str(
+            indent=indent, multiline_strings=multiline_strings, **kwargs
+        )
+
+        with open(path, "w") as f:
+            f.write(toml_str)
+
+    @classmethod
+    def from_toml_str(cls, toml_str: str, /):
+        """Create configuration from a TOML string.
+
+        Args:
+            toml_str: TOML string
+
+        Returns:
+            A validated configuration instance
+
+        Raises:
+            ImportError: If tomli is not installed
+        """
+        try:
+            from tomli import loads
+        except ImportError:
+            raise ImportError(
+                "Tomli is required for TOML support. "
+                "You can either install nshconfig with "
+                "all extras using 'pip install nshconfig[extra]"
+                ", or install with 'pip install tomli'"
+            )
+
+        config_dict = loads(toml_str)
+        return cls.from_dict(config_dict)
+
+    @classmethod
+    def from_toml_file(cls, path: str | Path, /):
+        """Create configuration from a TOML file.
+
+        Args:
+            path: Path to the TOML file
+        """
+        toml_str = Path(path).read_text()
+        return cls.from_toml_str(toml_str)
+
 
 def _get_schema_uri(cls: type[Config]) -> str | None:
     """Helper to get the absolute schema path for a config class."""
