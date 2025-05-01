@@ -5,14 +5,14 @@ import copy
 import importlib.util
 import json
 import logging
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, get_origin
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, get_origin, overload
 
 from pydantic import BaseModel, PrivateAttr, model_serializer
 from pydantic import ConfigDict as _ConfigDict
 from pydantic.main import IncEx
-from typing_extensions import Self, TypedDict, Unpack, override
+from typing_extensions import Self, TypedDict, TypeVar, Unpack, override
 
 if TYPE_CHECKING:
     from ruamel.yaml import YAML
@@ -870,3 +870,22 @@ def _try_set_hash(cls: type[Config]):
 
     set_default_hash_func(cls, cls.__bases__)
     log.info(f"Default hash function set for class: {cls.__name__}")
+
+
+_TypeT = TypeVar("_TypeT", bound=type[Config], infer_variance=True)
+
+
+@overload
+def with_config(config: ConfigDict, /) -> Callable[[_TypeT], _TypeT]: ...
+
+
+@overload
+def with_config(**config: Unpack[ConfigDict]) -> Callable[[_TypeT], _TypeT]: ...
+
+
+def with_config(
+    config: ConfigDict | None = None, /, **kwargs: Any
+) -> Callable[[_TypeT], _TypeT]:
+    from pydantic import with_config
+
+    return with_config(config, **kwargs)  # pyright: ignore[reportArgumentType]
