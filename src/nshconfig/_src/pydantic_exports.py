@@ -154,7 +154,7 @@ from pydantic import JsonValue as JsonValue
 from pydantic import FailFast as FailFast
 
 # type_adapter
-# from pydantic import TypeAdapter as TypeAdapter # We have our own version of this.
+from pydantic import TypeAdapter as TypeAdapter
 
 # warnings
 from pydantic import PydanticDeprecatedSince20 as PydanticDeprecatedSince20
