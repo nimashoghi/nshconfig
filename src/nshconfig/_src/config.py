@@ -922,7 +922,7 @@ def _try_set_hash(cls: type[Config]):
         return
 
     set_default_hash_func(cls, cls.__bases__)
-    log.info(f"Default hash function set for class: {cls.__name__}")
+    log.debug(f"Default hash function set for class: {cls.__name__}")
 
 
 _TypeT = TypeVar("_TypeT", bound=type[Config], infer_variance=True)
