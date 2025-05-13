@@ -11,6 +11,9 @@ missing_constant
 invalid_config
 lightning_integration
 root_config_cli
+deduplication
+hash_functionality
+singleton
 ```
 
 `nshconfig` comes with several powerful features:
@@ -25,3 +28,4 @@ root_config_cli
 - [RootConfig & CLI Integration](root_config_cli.md): Load settings from multiple sources and build CLI apps
 - [Deduplication](deduplication.md): Deduplicate configurations easily
 - [Hash Functionality](hash_functionality.md): Hashing for deduplication
+- [Singleton](singleton.md): Ensure a single instance of configuration classes

@@ -16,6 +16,7 @@ from ._src.root import CLI as CLI
 from ._src.root import CliApp as CliApp
 from ._src.root import RootConfig as RootConfig
 from ._src.root import RootConfigDict as RootConfigDict
+from ._src.singleton import Singleton as Singleton
 from ._src.utils import deduplicate as deduplicate
 from ._src.utils import deduplicate_configs as deduplicate_configs
 
