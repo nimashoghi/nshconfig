@@ -255,23 +255,24 @@ class Registry(Generic[TConfig]):
                 (e.cls for e in self._elements if e.tag == tag), None
             )
         ) is not None and registered_by_tag != cls:
-            match policy := self.config.get("duplicate_tag_policy", "error"):
-                case "warn-and-ignore":
-                    log.warning(
-                        f"Tag `{tag}` is already registered by {registered_by_tag}. Ignoring {cls}."
-                    )
-                    return cast(TClass, registered_by_tag)
-                case "warn-and-replace":
-                    log.warning(
-                        f"Tag `{tag}` is already registered by {registered_by_tag}. Replacing with {cls}."
-                    )
-                    self._elements = [e for e in self._elements if e.tag != tag]
-                case "error":
-                    raise ValueError(
-                        f"Tag `{tag}` is already registered by {registered_by_tag}."
-                    )
-                case _:
-                    assert_never(policy)
+            if (
+                policy := self.config.get("duplicate_tag_policy", "error")
+            ) == "warn-and-ignore":
+                log.warning(
+                    f"Tag `{tag}` is already registered by {registered_by_tag}. Ignoring {cls}."
+                )
+                return cast(TClass, registered_by_tag)
+            elif policy == "warn-and-replace":
+                log.warning(
+                    f"Tag `{tag}` is already registered by {registered_by_tag}. Replacing with {cls}."
+                )
+                self._elements = [e for e in self._elements if e.tag != tag]
+            elif policy == "error":
+                raise ValueError(
+                    f"Tag `{tag}` is already registered by {registered_by_tag}."
+                )
+            else:
+                assert_never(policy)
 
         # Add the cls to the registry
         self._elements.append(_RegistryEntry(tag=tag, cls=cls))

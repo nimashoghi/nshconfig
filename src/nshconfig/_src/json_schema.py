@@ -327,34 +327,25 @@ def _convert_schema_entry_worker(entry_name: str, entry_value: dict) -> CodeResu
 
     entry_type = entry_value.get("type")
     result = CodeResult.empty()
-    match entry_type:
-        case "string":
-            result.inline = "str"
-
-        case "integer":
-            result.inline = "int"
-
-        case "number":
-            result.inline = "float"
-
-        case "boolean":
-            result.inline = "bool"
-
-        case "null":
-            result.inline = "None"
-
-        case "array":
-            result = _convert_array_entry(entry_name, entry_value)
-
-        case "object":
-            result = _convert_object_entry(entry_name, entry_value)
-
-        case "x-python":
-            result = _convert_x_python(entry_name, entry_value)
-
-        case _:
-            msg = f"Invalid entry at {entry_name}: unknown type {entry_type}"
-            raise ValueError(msg)
+    if entry_type == "string":
+        result.inline = "str"
+    elif entry_type == "integer":
+        result.inline = "int"
+    elif entry_type == "number":
+        result.inline = "float"
+    elif entry_type == "boolean":
+        result.inline = "bool"
+    elif entry_type == "null":
+        result.inline = "None"
+    elif entry_type == "array":
+        result = _convert_array_entry(entry_name, entry_value)
+    elif entry_type == "object":
+        result = _convert_object_entry(entry_name, entry_value)
+    elif entry_type == "x-python":
+        result = _convert_x_python(entry_name, entry_value)
+    else:
+        msg = f"Invalid entry at {entry_name}: unknown type {entry_type}"
+        raise ValueError(msg)
 
     return result
 
