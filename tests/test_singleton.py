@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import ClassVar, Self
+from typing import ClassVar
 
 import pytest
+from typing_extensions import Self
 
 import nshconfig as C
 from nshconfig import Singleton
