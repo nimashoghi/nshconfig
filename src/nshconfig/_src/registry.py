@@ -181,7 +181,6 @@ class Registry(Generic[TConfig]):
     """
 
     base_cls: type[TConfig]
-    _: dataclasses.KW_ONLY
     discriminator: str
     config: RegistryConfig = dataclasses.field(
         default_factory=lambda: {

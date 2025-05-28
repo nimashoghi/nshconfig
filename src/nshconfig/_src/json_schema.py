@@ -8,7 +8,7 @@ from typing import Any
 from typing_extensions import override
 
 
-@dataclass(slots=True)
+@dataclass
 class CodeImport:
     module: str
     name: str
@@ -21,7 +21,7 @@ class CodeImport:
         return f"from {self.module} import {self.name}"
 
 
-@dataclass(slots=True)
+@dataclass
 class CodeResult:
     block: str
     inline: str

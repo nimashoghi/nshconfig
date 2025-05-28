@@ -52,7 +52,7 @@ if TYPE_CHECKING:
     _AllowMissing = object
 else:
 
-    @dataclass(slots=True, frozen=True)
+    @dataclass(frozen=True)
     class _AllowMissing:
         def __get_pydantic_core_schema__(
             self,
