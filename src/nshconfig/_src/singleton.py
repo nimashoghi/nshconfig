@@ -109,7 +109,6 @@ class Singleton(Generic[T]):
         self._check_class_access(None)
 
         # Quick check without acquiring the lock
-        print("self._instance", self._instance)
         if self._instance is not None:
             warnings.warn(
                 "Singleton instance already exists. "
