@@ -6,7 +6,10 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     try:
-        from treescope import renderers, rendering_parts
+        from treescope import (  # pyright: ignore[reportMissingImports]
+            renderers,
+            rendering_parts,
+        )
     except ImportError:
         pass
 
@@ -20,7 +23,7 @@ def render_object_constructor(
     color: str | None = None,
 ) -> "rendering_parts.Rendering":
     try:
-        from treescope import rendering_parts
+        from treescope import rendering_parts  # pyright: ignore[reportMissingImports]
     except ImportError:
         logging.exception("Failed to import treescope.rendering_parts")
         raise
