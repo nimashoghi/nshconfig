@@ -65,7 +65,7 @@ from typing import ClassVar
 import nshconfig as C
 
 class NonHashableConfig(C.Config):
-    model_config: ClassVar[dict] = {"set_default_hash": False}
+    model_config: ClassVar[C.ConfigDict] = {"set_default_hash": False}
 
     name: str = "default"
     value: int = 0

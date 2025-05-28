@@ -12,7 +12,7 @@ from nshconfig import Singleton
 
 # Test configuration class
 class MyConfig(C.Config):
-    singleton: ClassVar = Singleton[Self]()
+    singleton: ClassVar[Singleton[Self]] = Singleton[Self]()
 
     value: str
     number: int = 0
@@ -20,7 +20,7 @@ class MyConfig(C.Config):
 
 # Another test configuration class to verify multiple singletons work
 class AnotherConfig(C.Config):
-    singleton: ClassVar = Singleton[Self]()
+    singleton: ClassVar[Singleton[Self]] = Singleton[Self]()
 
     name: str
 
@@ -220,7 +220,7 @@ def test_inheritance_hierarchies():
 
     # Base class with a singleton
     class Base(C.Config):
-        singleton: ClassVar = Singleton[Self]()
+        singleton: ClassVar[Singleton[Self]] = Singleton[Self]()
         base_value: str
 
     # Derived class that doesn't define its own singleton - this should be an error
@@ -229,12 +229,12 @@ def test_inheritance_hierarchies():
 
     # Derived class that defines its own singleton - this is correct
     class DerivedCorrect(Base):
-        singleton: ClassVar = Singleton[Self]()
+        singleton: ClassVar[Singleton[Self]] = Singleton[Self]()  # pyright: ignore[reportIncompatibleVariableOverride]
         derived_value: str
 
     # Derived class that explicitly uses the base singleton - opt-in footgun
     class DerivedFootgun(Base):
-        singleton: ClassVar = Base.singleton
+        singleton: ClassVar[Singleton[Base]] = Base.singleton  # pyright: ignore[reportIncompatibleVariableOverride]
         derived_value: str
 
     # Initialize the Base singleton
@@ -280,17 +280,17 @@ def test_inheritance_reset():
 
     # Base class with a singleton
     class Parent(C.Config):
-        singleton: ClassVar = Singleton[Self]()
+        singleton: ClassVar[Singleton[Self]] = Singleton[Self]()
         parent_value: str
 
     # Child class that correctly defines its own singleton
     class Child(Parent):
-        singleton: ClassVar = Singleton[Self]()
+        singleton: ClassVar[Singleton[Self]] = Singleton[Self]()  # pyright: ignore[reportIncompatibleVariableOverride]
         child_value: str
 
     # Grandchild class that correctly defines its own singleton
     class Grandchild(Child):
-        singleton: ClassVar = Singleton[Self]()
+        singleton: ClassVar[Singleton[Self]] = Singleton[Self]()  # pyright: ignore[reportIncompatibleVariableOverride]
         grandchild_value: str
 
     # Initialize all singletons

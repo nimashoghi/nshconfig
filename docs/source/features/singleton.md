@@ -23,7 +23,7 @@ from typing import ClassVar, Self
 from nshconfig import Config, Singleton
 
 class MyConfig(Config):
-    singleton: ClassVar = Singleton[Self]()
+    singleton: ClassVar[Singleton[Self]] = Singleton[Self]()
     value: str
     number: int = 0
 ```
@@ -66,10 +66,10 @@ Initialization is thread-safe. If multiple threads attempt to initialize the sin
 
     ```python
     class BaseConfig(Config):
-        singleton: ClassVar = Singleton[Self]()
+        singleton: ClassVar[Singleton[Self]] = Singleton[Self]()
 
     class DerivedConfig(BaseConfig):
-        singleton: ClassVar = BaseConfig.singleton  # Explicitly share
+        singleton: ClassVar[Singleton[BaseConfig]] = BaseConfig.singleton  # Explicitly share
     ```
 
 ## API Reference
@@ -94,11 +94,11 @@ class Singleton(Generic[T]):
 
 ```python
 class ConfigA(Config):
-    singleton: ClassVar = Singleton[Self]()
+    singleton: ClassVar[Singleton[Self]] = Singleton[Self]()
     foo: int
 
 class ConfigB(Config):
-    singleton: ClassVar = Singleton[Self]()
+    singleton: ClassVar[Singleton[Self]] = Singleton[Self]()
     bar: str
 
 a = ConfigA.singleton.initialize(foo=1)
@@ -110,11 +110,11 @@ assert a is not b
 
 ```python
 class Parent(Config):
-    singleton: ClassVar = Singleton[Self]()
+    singleton: ClassVar[Singleton[Self]] = Singleton[Self]()
     parent_value: str
 
 class Child(Parent):
-    singleton: ClassVar = Singleton[Self]()
+    singleton: ClassVar[Singleton[Self]] = Singleton[Self]()
     child_value: str
 
 parent = Parent.singleton.initialize(parent_value="p")
