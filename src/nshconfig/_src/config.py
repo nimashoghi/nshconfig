@@ -10,7 +10,13 @@ from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, get_origin, overload
 
-from pydantic import BaseModel, PrivateAttr, model_serializer
+from pydantic import (
+    BaseModel,
+    PrivateAttr,
+    ValidationInfo,
+    model_serializer,
+    model_validator,
+)
 from pydantic import ConfigDict as _ConfigDict
 from pydantic.main import IncEx
 from typing_extensions import Self, TypedDict, TypeVar, Unpack, override
@@ -102,6 +108,9 @@ _DEFAULT_YAML_DUMP_KWARGS: YamlDumpKwargs = {
 }
 
 
+_JsonLoadContextSentinel = object()
+
+
 class Config(BaseModel, _MutableMappingBase):
     """
     A base configuration class that provides validation and serialization capabilities.
@@ -136,7 +145,7 @@ class Config(BaseModel, _MutableMappingBase):
         strict=True,
         revalidate_instances="always",
         arbitrary_types_allowed=True,
-        extra="ignore",
+        extra="forbid",
         validation_error_cause=True,
         use_attribute_docstrings=True,
         # Our custom config options
@@ -474,6 +483,22 @@ class Config(BaseModel, _MutableMappingBase):
 
     # JSON
 
+    @model_validator(mode="before")
+    @classmethod
+    def _pop_schema(cls, values: dict[str, Any], info: ValidationInfo):
+        if (
+            not info.context
+            or not isinstance(info.context, dict)
+            or (json_load_context := info.context.get("_nshconfig_json_load")) is None
+            or json_load_context is not _JsonLoadContextSentinel
+        ):
+            return values
+
+        # If the loaded config contains a `$schema` key (which was added by the
+        # `to_json_str` method with `with_schema=True`), we remove it.
+        values.pop("$schema", None)
+        return values
+
     def to_json_str(
         self,
         /,
@@ -548,7 +573,9 @@ class Config(BaseModel, _MutableMappingBase):
         Returns:
             A validated configuration instance
         """
-        return cls.model_validate_json(json_str)
+        return cls.model_validate_json(
+            json_str, context={"_nshconfig_json_load": _JsonLoadContextSentinel}
+        )
 
     @classmethod
     def from_json_file(cls, path: str | Path, /):
