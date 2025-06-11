@@ -119,6 +119,43 @@ if PYDANTIC_VERSION < "2.1.0":
     _legacy_pydantic_field_kwargs = {"hash": False}
 
 
+def _compat_monkey_patch_type_pr_8526():
+    from pydantic._internal import _core_utils
+
+    def handle_definitions_schema(
+        self, schema: core_schema.DefinitionsSchema, f: _core_utils.Walk
+    ) -> core_schema.CoreSchema:
+        new_definitions: list[core_schema.CoreSchema] = []
+        for definition in schema["definitions"]:
+            if "schema_ref" and "ref" in definition:
+                # This indicates a purposely indirect reference
+                # We want to keep such references around for implications related to JSON schema, etc.:
+                new_definitions.append(definition)
+                # However, we still need to walk the referenced definition:
+                self.walk(definition, f)
+                continue
+
+            updated_definition = self.walk(definition, f)
+            if "ref" in updated_definition:
+                # If the updated definition schema doesn't have a 'ref', it shouldn't go in the definitions
+                # This is most likely to happen due to replacing something with a definition reference, in
+                # which case it should certainly not go in the definitions list
+                new_definitions.append(updated_definition)
+        new_inner_schema = self.walk(schema["schema"], f)
+
+        if not new_definitions and len(schema) == 3:
+            # This means we'd be returning a "trivial" definitions schema that just wrapped the inner schema
+            return new_inner_schema
+
+        new_schema = schema.copy()
+        new_schema["schema"] = new_inner_schema
+        new_schema["definitions"] = new_definitions
+        return new_schema
+
+    _core_utils._WalkCoreSchema.handle_definitions_schema = handle_definitions_schema  # type: ignore
+    _core_utils._dispatch = _core_utils._WalkCoreSchema().walk  # type: ignore
+
+
 @dataclasses.dataclass(**_legacy_pydantic_class_kwargs)
 class Registry(Generic[TConfig]):
     """A registry system for creating dynamic discriminated unions with Pydantic models.
@@ -212,6 +249,19 @@ class Registry(Generic[TConfig]):
         **_legacy_pydantic_field_kwargs,
     )
     _invalid_cls: type[Config] | None = None
+
+    def __post_init__(self):
+        # Pydantic versions between 2.4.2 and 2.5.3 have a bug in the way
+        # they handle TypeAliasType (see issue: https://github.com/pydantic/pydantic/pull/8526/)
+        # Here, we will just monkey-patch the code to apply the fix from the
+        # Pydantic PR to ensure that TypeAliasType works correctly.
+        if PYDANTIC_VERSION >= "2.4.2" and PYDANTIC_VERSION < "2.6.0":
+            log.warning(
+                "Pydantic versions 2.4.2 to 2.5.3 have a bug with TypeAliasType. "
+                "This registry will monkey-patch the code to fix this issue. "
+                "Please upgrade to Pydantic 2.6.0 or later when available.",
+            )
+            _compat_monkey_patch_type_pr_8526()
 
     def _ref(
         self,
