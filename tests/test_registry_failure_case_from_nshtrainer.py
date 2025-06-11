@@ -4,9 +4,11 @@ from abc import ABC
 from collections.abc import Sequence
 from typing import Annotated, Literal
 
+import pytest
 from typing_extensions import TypeAliasType
 
 import nshconfig as C
+from nshconfig._src.utils import PYDANTIC_VERSION
 
 
 def test_nested_annotation_case_from_nshtrainer():
@@ -16,7 +18,18 @@ def test_nested_annotation_case_from_nshtrainer():
     class PluginBaseConfig(C.Config, ABC):
         pass
 
+    # For pydantic versions > 2.6.0 and <= 2.7.0, this test will fail.
+    # All we can do here is to warn the user about the issue.
+    if PYDANTIC_VERSION > "2.6.0" and PYDANTIC_VERSION <= "2.7.0":
+        with pytest.warns(
+            UserWarning,
+            match="Pydantic versions > 2.6.0 and <= 2.7.0 have a bug with complex, recursive types",
+        ):
+            plugin_registry = C.Registry(PluginBaseConfig, discriminator="name")
+            return
+
     plugin_registry = C.Registry(PluginBaseConfig, discriminator="name")
+
     PluginConfig = TypeAliasType(  # type: ignore
         "PluginConfig", Annotated[PluginBaseConfig, plugin_registry]
     )

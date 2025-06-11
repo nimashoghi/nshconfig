@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import typing
+import warnings
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypedDict, TypeVar, cast
 
@@ -258,12 +259,23 @@ class Registry(Generic[TConfig]):
         # Here, we will just monkey-patch the code to apply the fix from the
         # Pydantic PR to ensure that TypeAliasType works correctly.
         if PYDANTIC_VERSION >= "2.4.2" and PYDANTIC_VERSION < "2.6.0":
-            log.warning(
+            warnings.warn(
                 "Pydantic versions 2.4.2 to 2.5.3 have a bug with TypeAliasType. "
                 "This registry will monkey-patch the code to fix this issue. "
                 "Please upgrade to Pydantic 2.6.0 or later when available.",
             )
             _compat_monkey_patch_type_pr_8526()
+
+        # There is a bug in Pydantic > 2.6.0 (but not 2.6.0 itself) and <= 2.7.0
+        # which makes complex, recursive types not work properly. We should
+        # log a warning about this and suggest users to upgrade to 2.7.1 or later,
+        # but there is nothing more we can do about it.
+        if PYDANTIC_VERSION > "2.6.0" and PYDANTIC_VERSION <= "2.7.0":
+            warnings.warn(
+                "Pydantic versions > 2.6.0 and <= 2.7.0 have a bug with complex, recursive types. "
+                "The registry will not work properly if you use complex types with it. "
+                "Please upgrade to Pydantic 2.7.1 or later.",
+            )
 
     def _ref(
         self,
