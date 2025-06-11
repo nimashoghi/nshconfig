@@ -22,7 +22,17 @@ class MissingValue(BaseModel):
     NSHCONFIG___MISSING_SENTINEL: Literal["NSHCONFIG___MISSING_SENTINEL_VALUE"] = Field(
         default="NSHCONFIG___MISSING_SENTINEL_VALUE",
         title="Missing",
-        json_schema_extra={"type": "string"},
+        # Different Pydantic versions serialize the JSON schema of this kind of
+        # field differently. All versions emit {"const": "NSHCONFIG___MISSING_SENTINEL_VALUE"},
+        # but some versions also emit {"type": "string"}, and some also emit
+        # {"enum": ["NSHCONFIG___MISSING_SENTINEL_VALUE"]}.
+        # We want to ensure that the JSON schema is always the same, so we
+        # explicitly set the type and enum here, even for versions that don't
+        # normally emit them.
+        json_schema_extra={
+            "type": "string",
+            "enum": ["NSHCONFIG___MISSING_SENTINEL_VALUE"],
+        },
     )
 
 
