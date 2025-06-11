@@ -10,6 +10,7 @@ from ._src.missing import MISSING as MISSING
 from ._src.missing import AllowMissing as AllowMissing
 from ._src.missing import validate_no_missing as validate_no_missing
 from ._src.pydantic_exports import *
+from ._src.pydantic_settings_export import *
 from ._src.registry import Registry as Registry
 from ._src.registry import RegistryConfig as RegistryConfig
 from ._src.root import CLI as CLI

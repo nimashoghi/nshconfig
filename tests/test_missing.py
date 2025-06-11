@@ -7,6 +7,7 @@ from pydantic_core import PydanticCustomError
 
 import nshconfig as C
 from nshconfig._src.missing import MissingValue, validate_no_missing
+from nshconfig._src.utils import PYDANTIC_VERSION
 
 
 def test_missing_constant_identity():
@@ -174,6 +175,7 @@ def test_allow_missing_json_schema():
                 "type": "object",
             },
         },
+        "additionalProperties": False,
         "properties": {
             "field": {
                 "anyOf": [
@@ -196,8 +198,10 @@ def test_missing_single_instance():
     assert MissingValue() is C.MISSING
     assert MissingValue.model_validate({}) is C.MISSING
     assert MissingValue.model_validate_json("{}") is C.MISSING
-    assert MissingValue.model_validate_strings({}) is C.MISSING
     assert MissingValue.model_construct() is C.MISSING
+
+    if PYDANTIC_VERSION >= "2.4.0":
+        assert MissingValue.model_validate_strings({}) is C.MISSING  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def test_new_syntax_allow_missing_basic_usage():
@@ -359,6 +363,7 @@ def test_new_syntax_allow_missing_json_schema():
                 "type": "object",
             },
         },
+        "additionalProperties": False,
         "properties": {
             "field": {
                 "anyOf": [
@@ -535,6 +540,7 @@ def test_old_syntax_allow_missing_json_schema():
                 "type": "object",
             },
         },
+        "additionalProperties": False,
         "properties": {
             "field": {
                 "anyOf": [

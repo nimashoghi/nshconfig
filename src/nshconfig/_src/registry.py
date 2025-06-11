@@ -11,8 +11,10 @@ from pydantic.fields import FieldInfo
 from pydantic_core import core_schema
 from typing_extensions import assert_never, deprecated, override
 
+from .utils import PYDANTIC_VERSION
+
 if TYPE_CHECKING:
-    from .config import Config
+    from .config import Config, ConfigDict
 
 log = logging.getLogger(__name__)
 
@@ -34,9 +36,7 @@ def _unwrap_annotated_recurive(typ: Any):
 
 def _resolve_tag(cls: type[Config], discriminator_field_name: str) -> str:
     # Make sure cls has the discriminator attribute
-    if (
-        discriminator_field := cls.__pydantic_fields__.get(discriminator_field_name)
-    ) is None:
+    if (discriminator_field := cls.model_fields.get(discriminator_field_name)) is None:
         raise ValueError(f"{cls} does not have a field `{discriminator_field_name}`")
 
     # Make sure the discriminator field is a Literal
@@ -90,8 +90,12 @@ def _no_configs_registered_invalid_config(registry: Registry) -> type[Config]:
     if registry._invalid_cls is None:
         from .config import Config
 
+        _model_config: ConfigDict = {}
+        if PYDANTIC_VERSION >= "2.1.0":
+            _model_config = {"defer_build": True}  # pyright: ignore[reportAssignmentType]
+
         class NoConfigsRegisteredInvalidConfig(Config):
-            model_config = {"defer_build": True}
+            model_config = {**_model_config}
 
             @model_validator(mode="before")
             @classmethod
@@ -105,7 +109,17 @@ def _no_configs_registered_invalid_config(registry: Registry) -> type[Config]:
     return registry._invalid_cls
 
 
-@dataclasses.dataclass
+# Pydantic < 2.1.0 has a behavior where in some situations, it expects
+# types to be hashable. This is a workaround to ensure that
+# the Registry class is hashable.
+_legacy_pydantic_class_kwargs: Any = {}
+_legacy_pydantic_field_kwargs: Any = {}
+if PYDANTIC_VERSION < "2.1.0":
+    _legacy_pydantic_class_kwargs = {"unsafe_hash": True}
+    _legacy_pydantic_field_kwargs = {"hash": False}
+
+
+@dataclasses.dataclass(**_legacy_pydantic_class_kwargs)
 class Registry(Generic[TConfig]):
     """A registry system for creating dynamic discriminated unions with Pydantic models.
 
@@ -186,11 +200,16 @@ class Registry(Generic[TConfig]):
         default_factory=lambda: {
             "duplicate_tag_policy": "error",
             "auto_rebuild": True,
-        }
+        },
+        **_legacy_pydantic_field_kwargs,
     )
-    _elements: list[_RegistryEntry] = dataclasses.field(default_factory=lambda: [])
+    _elements: list[_RegistryEntry] = dataclasses.field(
+        default_factory=lambda: [],
+        **_legacy_pydantic_field_kwargs,
+    )
     _on_register_callbacks: list[Callable[[type[Config]], None]] = dataclasses.field(
-        default_factory=lambda: []
+        default_factory=lambda: [],
+        **_legacy_pydantic_field_kwargs,
     )
     _invalid_cls: type[Config] | None = None
 
@@ -372,11 +391,34 @@ class Registry(Generic[TConfig]):
         """
 
         def _rebuild(_: type[Config]):
-            cls.model_rebuild(force=True, raise_errors=False)
-            log.info(f"Rebuilt {cls} schema due to registry changes.")
+            # For older Pydantic versions, the `model_rebuild` method
+            # does not work properly, so we need to do some additional work.
+            if PYDANTIC_VERSION < "2.1.0":
+                if "__pydantic_core_schema__" in cls.__dict__:
+                    delattr(
+                        cls, "__pydantic_core_schema__"
+                    )  # delete cached value to ensure full rebuild happens
 
+            cls.model_rebuild(force=True, raise_errors=False)
+            log.debug(f"Rebuilt {cls} schema due to registry changes.")
+
+        log.debug(f"Registering {cls} for auto-rebuild on registry changes.")
         self._on_register_callbacks.append(_rebuild)
         _rebuild(cls)
+        return cls
+
+    def _rebuild_on_registers_if_auto_rebuild(
+        self, cls: type[Config], /, *args: Any, **kwargs: Any
+    ) -> type[Config]:
+        """Rebuild the class schema if auto_rebuild is enabled.
+
+        This is a helper method that checks the registry's config for auto_rebuild
+        and rebuilds the class schema if it is enabled. It is used internally by
+        the `rebuild_on_registers` decorator.
+        """
+        if self.config.get("auto_rebuild", True):
+            log.debug(f"Auto-rebuilding {cls} schema due to registry changes.")
+            return self.rebuild_on_registers(cls, *args, **kwargs)
         return cls
 
     def type_hint(self):
@@ -389,7 +431,12 @@ class Registry(Generic[TConfig]):
         else:
             # Construct the annotated union type.
             t = typing.Union[tuple(e.cls for e in self._elements)]
-            field_info = Field(discriminator=self.discriminator)
+            # Pydantic < 2.1.0 does not support discriminated Unions with 1 element,
+            # so we need to handle that case separately.
+            if PYDANTIC_VERSION < "2.1.0" and len(self._elements) == 1:
+                field_info = Field()
+            else:
+                field_info = Field(discriminator=self.discriminator)
             field_info.annotation = t
             t = typing.Annotated[t, field_info]
 
@@ -403,7 +450,12 @@ class Registry(Generic[TConfig]):
         """
         from pydantic import TypeAdapter
 
-        return TypeAdapter[TConfig](self.type_hint())
+        # Earlier versions of TypeAdapter do not have the proper overload
+        # for TypeAdapter.__init__ that handles `Any` types (which is needed
+        # in cases we are trying to pass an `Annotated` type), so we explicitly
+        # cast this to Any to avoid type errors.
+        type_ = cast(Any, self.type_hint())
+        return TypeAdapter[TConfig](type_)
 
     def construct(self, config: Any) -> TConfig:
         """Construct a registered type instance from configuration data.

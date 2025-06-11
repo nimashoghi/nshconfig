@@ -6,23 +6,77 @@ import logging
 import sys
 import threading
 from argparse import Namespace
+from collections.abc import Sequence
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from pydantic._internal._signature import _field_name_for_signature
 from pydantic_settings import (
     BaseSettings,
-    CliSettingsSource,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
-    SettingsError,
-    get_subcommand,
 )
-from pydantic_settings.sources import ENV_FILE_SENTINEL, DotenvType, PathType
-from pydantic_settings.sources.types import PydanticModel
+from pydantic_settings.sources import ENV_FILE_SENTINEL, DotenvType
 from typing_extensions import Self, TypeVar, override
 
 from .config import Config, ConfigDict
+from .utils import PYDANTIC_SETTINGS_VERSION
+
+try:
+    from pydantic_settings import (
+        SettingsError,  # pyright: ignore[reportAttributeAccessIssue]
+    )
+except ImportError:
+    from pydantic_settings.sources import (
+        SettingsError,  # pyright: ignore[reportAttributeAccessIssue]
+    )
+
+try:
+    from pydantic_settings import (
+        CliSettingsSource,  # pyright: ignore[reportAttributeAccessIssue]
+    )
+except ImportError:
+    CliSettingsSource = Any
+
+try:
+    from pydantic._internal._signature import (  # pyright: ignore[reportMissingImports]
+        _field_name_for_signature,
+    )
+except ImportError:
+    import keyword
+
+    if TYPE_CHECKING:
+        from pydantic.fields import FieldInfo
+
+    def _is_valid_identifier(identifier: str) -> bool:
+        """Checks that a string is a valid identifier and not a Python keyword.
+        :param identifier: The identifier to test.
+        :return: True if the identifier is valid.
+        """
+        return identifier.isidentifier() and not keyword.iskeyword(identifier)
+
+    def _field_name_for_signature(field_name: str, field_info: FieldInfo) -> str:
+        """Extract the correct name to use for the field when generating a signature.
+
+        Assuming the field has a valid alias, this will return the alias. Otherwise, it will return the field name.
+        First priority is given to the alias, then the validation_alias, then the field name.
+
+        Args:
+            field_name: The name of the field
+            field_info: The corresponding FieldInfo object.
+
+        Returns:
+            The correct name to use when generating a signature.
+        """
+        if isinstance(field_info.alias, str) and _is_valid_identifier(field_info.alias):
+            return field_info.alias
+        if isinstance(field_info.validation_alias, str) and _is_valid_identifier(
+            field_info.validation_alias
+        ):
+            return field_info.validation_alias
+
+        return field_name
+
 
 log = logging.getLogger(__name__)
 
@@ -76,62 +130,20 @@ class RootConfigDict(ConfigDict, SettingsConfigDict, total=False):
 
 
 class RootConfig(BaseSettings, Config):
-    model_config: ClassVar[RootConfigDict] = RootConfigDict(  # pyright: ignore[reportIncompatibleVariableOverride]
-        validate_assignment=True,
-        validate_return=True,
-        validate_default=True,
-        strict=True,
-        revalidate_instances="always",
-        arbitrary_types_allowed=True,
-        extra="forbid",
-        validation_error_cause=True,
-        use_attribute_docstrings=True,
+    model_config: ClassVar[RootConfigDict] = {  # pyright: ignore[reportIncompatibleVariableOverride]
+        **Config.model_config,
         # BaseSettings default options
-        case_sensitive=False,
-        env_prefix="",
-        nested_model_default_partial_update=False,
-        env_file=None,
-        env_file_encoding=None,
-        env_ignore_empty=False,
-        env_nested_delimiter=None,
-        env_nested_max_split=None,
-        env_parse_none_str=None,
-        env_parse_enums=None,
-        cli_prog_name=None,
-        cli_parse_args=None,
-        cli_parse_none_str=None,
-        cli_hide_none_type=False,
-        cli_avoid_json=False,
-        cli_enforce_required=False,
-        cli_use_class_docs_for_groups=False,
-        cli_exit_on_error=True,
-        cli_prefix="",
-        cli_flag_prefix_char="-",
-        cli_implicit_flags=True,
-        cli_ignore_unknown_args=False,
-        cli_kebab_case=True,
-        json_file=None,
-        json_file_encoding=None,
-        yaml_file=None,
-        yaml_file_encoding=None,
-        toml_file=None,
-        secrets_dir=None,
-        protected_namespaces=(
-            "model_validate",
-            "model_dump",
-            "settings_customise_sources",
-        ),
-        enable_decoding=True,
+        **BaseSettings.model_config,
         # Custom Config options
-        repr_diff_only=False,
-        no_validate_assignment_for_draft=True,
-        set_default_hash=True,
-        disable_typed_dict_generation=False,
+        "repr_diff_only": False,
+        "no_validate_assignment_for_draft": True,
+        "set_default_hash": True,
+        "disable_typed_dict_generation": False,
         # Custom RootConfig options
-        unset_magic_init_method=True,
-        respect_pydantic_settings_callers=False,
-        auto_set_sources_from_model_config=True,
-    )
+        "unset_magic_init_method": True,
+        "respect_pydantic_settings_callers": False,
+        "auto_set_sources_from_model_config": True,
+    }
 
     if not TYPE_CHECKING:
 
@@ -169,7 +181,7 @@ class RootConfig(BaseSettings, Config):
                 del frame  # avoid reference cycles
 
                 if came_from_pydantic_settings:
-                    log.info(
+                    log.debug(
                         "BaseSettings.__init__ called from pydantic_settings, "
                         "enabling BaseSettings magic initialization"
                     )
@@ -179,7 +191,7 @@ class RootConfig(BaseSettings, Config):
 
             # either respect=False, or no pydantic caller found:
             # skip BaseSettings and go straight to Config.__init__
-            log.info(
+            log.debug(
                 "BaseSettings.__init__ called from outside pydantic_settings, "
                 "skipping BaseSettings magic initialization"
             )
@@ -211,22 +223,50 @@ class RootConfig(BaseSettings, Config):
             return t
 
         if settings_cls.model_config.get("json_file"):
-            from pydantic_settings import JsonConfigSettingsSource
+            if PYDANTIC_SETTINGS_VERSION < "2.2.0":
+                raise SettingsError(
+                    "json_file is only supported in pydantic-settings >= 2.2.0"
+                )
+
+            from pydantic_settings import (
+                JsonConfigSettingsSource,  # pyright: ignore[reportAttributeAccessIssue]
+            )
 
             t = (JsonConfigSettingsSource(settings_cls),) + t
 
         if settings_cls.model_config.get("yaml_file"):
-            from pydantic_settings import YamlConfigSettingsSource
+            if PYDANTIC_SETTINGS_VERSION < "2.2.0":
+                raise SettingsError(
+                    "yaml_file is only supported in pydantic-settings >= 2.2.0"
+                )
+
+            from pydantic_settings import (
+                YamlConfigSettingsSource,  # pyright: ignore[reportAttributeAccessIssue]
+            )
 
             t = (YamlConfigSettingsSource(settings_cls),) + t
 
         if settings_cls.model_config.get("toml_file"):
-            from pydantic_settings import TomlConfigSettingsSource
+            if PYDANTIC_SETTINGS_VERSION < "2.2.0":
+                raise SettingsError(
+                    "toml_file is only supported in pydantic-settings >= 2.2.0"
+                )
+
+            from pydantic_settings import (
+                TomlConfigSettingsSource,  # pyright: ignore[reportAttributeAccessIssue]
+            )
 
             t = (TomlConfigSettingsSource(settings_cls),) + t
 
         if settings_cls.model_config.get("pyproject_toml_table_header"):
-            from pydantic_settings import PyprojectTomlConfigSettingsSource
+            if PYDANTIC_SETTINGS_VERSION < "2.3.0":
+                raise SettingsError(
+                    "pyproject_toml_table_header is only supported in pydantic-settings >= 2.3.0"
+                )
+
+            from pydantic_settings import (
+                PyprojectTomlConfigSettingsSource,  # pyright: ignore[reportAttributeAccessIssue]
+            )
 
             t = (PyprojectTomlConfigSettingsSource(settings_cls),) + t
 
@@ -247,7 +287,7 @@ class RootConfig(BaseSettings, Config):
         _env_parse_enums: bool | None = None,
         _cli_prog_name: str | None = None,
         _cli_parse_args: bool | list[str] | tuple[str, ...] | None = None,
-        _cli_settings_source: CliSettingsSource[Any] | None = None,
+        _cli_settings_source: CliSettingsSource[Any] | None = None,  # pyright: ignore[reportInvalidTypeForm]
         _cli_parse_none_str: str | None = None,
         _cli_hide_none_type: bool | None = None,
         _cli_avoid_json: bool | None = None,
@@ -259,7 +299,7 @@ class RootConfig(BaseSettings, Config):
         _cli_implicit_flags: bool | None = None,
         _cli_ignore_unknown_args: bool | None = None,
         _cli_kebab_case: bool | None = None,
-        _secrets_dir: PathType | None = None,
+        _secrets_dir: str | Path | Sequence[str | Path] | None = None,
         **values: Any,
     ):
         """
@@ -370,7 +410,7 @@ class CLI:
         | SimpleNamespace
         | dict[str, Any]
         | None = None,
-        cli_settings_source: CliSettingsSource[Any] | None = None,
+        cli_settings_source: CliSettingsSource[Any] | None = None,  # type: ignore
         cli_exit_on_error: bool | None = None,
         cli_cmd_method_name: str = "cli_cmd",
         **model_init_data: Any,
@@ -443,10 +483,10 @@ class CLI:
 
     @staticmethod
     def run_subcommand(
-        model: PydanticModel,
+        model: Config,
         cli_exit_on_error: bool | None = None,
         cli_cmd_method_name: str = "cli_cmd",
-    ) -> PydanticModel:
+    ) -> Config:
         """
         Runs the model subcommand. Running a model subcommand requires the `cli_cmd` method to be defined in
         the nested model subcommand class.
@@ -464,6 +504,14 @@ class CLI:
             SystemExit: When no subcommand is found and cli_exit_on_error=`True` (the default).
             SettingsError: When no subcommand is found and cli_exit_on_error=`False`.
         """
+        if PYDANTIC_SETTINGS_VERSION < "2.3.0":
+            raise SettingsError(
+                "Subcommands are only supported in pydantic-settings >= 2.3.0"
+            )
+
+        from pydantic_settings import (
+            get_subcommand,  # pyright: ignore[reportAttributeAccessIssue]
+        )
 
         subcommand = get_subcommand(
             model, is_required=True, cli_exit_on_error=cli_exit_on_error

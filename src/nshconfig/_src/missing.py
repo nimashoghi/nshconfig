@@ -5,8 +5,7 @@ import typing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field
-from pydantic.annotated_handlers import GetCoreSchemaHandler
+from pydantic import BaseModel, ConfigDict, Field, GetCoreSchemaHandler
 from pydantic_core import CoreSchema, PydanticCustomError
 from typing_extensions import TypeVar
 
@@ -23,6 +22,7 @@ class MissingValue(BaseModel):
     NSHCONFIG___MISSING_SENTINEL: Literal["NSHCONFIG___MISSING_SENTINEL_VALUE"] = Field(
         default="NSHCONFIG___MISSING_SENTINEL_VALUE",
         title="Missing",
+        json_schema_extra={"type": "string"},
     )
 
 
@@ -71,7 +71,7 @@ else:
 
 
 def validate_no_missing(model: BaseModel):
-    for name, field in type(model).__pydantic_fields__.items():
+    for name, field in type(model).model_fields.items():
         # If the field doesn't have the `AllowMissing` annotation, ignore it.
         #   (i.e., just let Pydantic do its thing).
         if not any(isinstance(m, _AllowMissing) for m in field.metadata):

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Generic, Literal, overload
+from typing import Any, Generic, Literal, cast, overload
 
 from pydantic import ConfigDict, TypeAdapter
-from pydantic.main import IncEx
 from typing_extensions import TypedDict, TypeVar, Unpack
+
+from .utils import IncEx
 
 T = TypeVar("T", infer_variance=True)
 
@@ -106,7 +107,7 @@ class Adapter(Generic[T]):
         Returns:
             Python representation of the data
         """
-        return self.adapter.dump_python(instance, **kwargs)
+        return self.adapter.dump_python(instance, **cast(Any, kwargs))
 
     def from_python(
         self,
@@ -124,7 +125,7 @@ class Adapter(Generic[T]):
         Returns:
             Validated instance
         """
-        return self.adapter.validate_python(data, **kwargs)
+        return self.adapter.validate_python(data, **cast(Any, kwargs))
 
     def to_json_str(
         self,
@@ -139,7 +140,7 @@ class Adapter(Generic[T]):
             kwargs: Additional keyword arguments to pass to the JSON dumper,
                 these are parameters directly passed to TypeAdapter.dump_json().
         """
-        json_bytes = self.adapter.dump_json(instance, **kwargs)
+        json_bytes = self.adapter.dump_json(instance, **cast(Any, kwargs))
         return json_bytes.decode("utf-8")
 
     def to_json_file(
@@ -157,25 +158,25 @@ class Adapter(Generic[T]):
                 these are parameters directly passed to TypeAdapter.dump_json().
         """
         with open(path, "w", encoding="utf-8") as f:
-            f.write(self.to_json_str(instance, **kwargs))
+            f.write(self.to_json_str(instance, **cast(Any, kwargs)))
 
     def from_json_str(
         self,
-        json: str | bytes | bytearray,
+        json: str | bytes,
         /,
         **kwargs: Unpack[ValidateJsonParams],
     ):
         """Create configuration from a JSON string.
 
         Args:
-            json: JSON string, bytes or bytearray
+            json: JSON string or bytes
             kwargs: Additional keyword arguments to pass to the JSON loader,
                 these are parameters directly passed to TypeAdapter.validate_json().
 
         Returns:
             A validated configuration instance
         """
-        return self.adapter.validate_json(json, **kwargs)
+        return self.adapter.validate_json(json, **cast(Any, kwargs))
 
     def from_json_file(
         self,
@@ -194,7 +195,7 @@ class Adapter(Generic[T]):
             A validated configuration instance
         """
         with open(path, "r", encoding="utf-8") as f:
-            return self.from_json_str(f.read(), **kwargs)
+            return self.from_json_str(f.read(), **cast(Any, kwargs))
 
     def from_python_file(
         self,
@@ -225,7 +226,7 @@ class Adapter(Generic[T]):
         module = import_python_file(path)
         config = extract_config_from_module(module)
 
-        return self.adapter.validate_python(config, **kwargs)
+        return self.adapter.validate_python(config, **cast(Any, kwargs))
 
     def from_python_module(
         self,
@@ -256,4 +257,4 @@ class Adapter(Generic[T]):
         module = import_python_module(module_name)
         config = extract_config_from_module(module)
 
-        return self.adapter.validate_python(config, **kwargs)
+        return self.adapter.validate_python(config, **cast(Any, kwargs))

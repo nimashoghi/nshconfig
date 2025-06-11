@@ -114,3 +114,21 @@ def test_auto_rebuild():
 
     # No raise
     Root(my_prop=Prop2()).model_dump()
+
+
+def test_empty_registry():
+    """Test that an empty registry can be created and used."""
+
+    class BaseConfig(C.Config, ABC):
+        pass
+
+    empty_registry = C.Registry(BaseConfig, discriminator="name")
+
+    class ExampleConfig(C.Config):
+        name: Literal["example"] = "example"
+        value1: int
+        value_registry: Annotated[BaseConfig, empty_registry] | None = None
+
+    # Create an instance of the registered config, and this should not raise an error
+    instance = ExampleConfig(value1=42)
+    assert instance.value1 == 42

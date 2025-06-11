@@ -18,8 +18,24 @@ from pydantic import (
     model_validator,
 )
 from pydantic import ConfigDict as _ConfigDict
-from pydantic.main import IncEx
 from typing_extensions import Self, TypedDict, TypeVar, Unpack, override
+
+from .utils import PYDANTIC_SETTINGS_VERSION, PYDANTIC_VERSION, IncEx
+
+try:
+    from pydantic import with_config as _pydantic_with_config  # type: ignore
+except ImportError:
+    _WithConfigTypeT = TypeVar("_WithConfigTypeT", bound=type)
+
+    def _pydantic_with_config(
+        config: ConfigDict,
+    ) -> Callable[[_WithConfigTypeT], _WithConfigTypeT]:
+        def inner(TypedDictClass: _WithConfigTypeT, /) -> _WithConfigTypeT:
+            TypedDictClass.__pydantic_config__ = config
+            return TypedDictClass
+
+        return inner
+
 
 if TYPE_CHECKING:
     from ruamel.yaml import YAML
@@ -110,6 +126,24 @@ _DEFAULT_YAML_DUMP_KWARGS: YamlDumpKwargs = {
 
 _JsonLoadContextSentinel = object()
 
+_model_config: ConfigDict = {
+    # Pydantic's default config options
+    **BaseModel.model_config,
+    # Our overrides
+    "validate_assignment": True,
+    "validate_return": True,
+    "validate_default": True,
+    "strict": True,
+    "revalidate_instances": "always",
+    "arbitrary_types_allowed": True,
+    "extra": "forbid",
+    # Our custom config options
+    "repr_diff_only": False,
+    "no_validate_assignment_for_draft": True,
+    "set_default_hash": True,
+    "disable_typed_dict_generation": False,
+}
+
 
 class Config(BaseModel, _MutableMappingBase):
     """
@@ -138,22 +172,32 @@ class Config(BaseModel, _MutableMappingBase):
         ```
     """
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(  # pyright: ignore[reportIncompatibleVariableOverride]
-        validate_assignment=True,
-        validate_return=True,
-        validate_default=True,
-        strict=True,
-        revalidate_instances="always",
-        arbitrary_types_allowed=True,
-        extra="forbid",
-        validation_error_cause=True,
-        use_attribute_docstrings=True,
+    model_config: ClassVar[ConfigDict] = {  # pyright: ignore[reportIncompatibleVariableOverride]
+        # Pydantic's default config options
+        **BaseModel.model_config,
+        # Our overrides
+        "validate_assignment": True,
+        "validate_return": True,
+        "validate_default": True,
+        "strict": True,
+        "revalidate_instances": "always",
+        "arbitrary_types_allowed": True,
+        "extra": "forbid",
+        # The settings below are > 2.0.0; to prevent type-checking errors on
+        # older versions, we use `cast` to ensure compatibility.
+        **cast(
+            ConfigDict,
+            {
+                "validation_error_cause": True,
+                "use_attribute_docstrings": True,
+            },
+        ),
         # Our custom config options
-        repr_diff_only=False,
-        no_validate_assignment_for_draft=True,
-        set_default_hash=True,
-        disable_typed_dict_generation=False,
-    )
+        "repr_diff_only": False,
+        "no_validate_assignment_for_draft": True,
+        "set_default_hash": True,
+        "disable_typed_dict_generation": False,
+    }
 
     if TYPE_CHECKING:
 
@@ -176,7 +220,7 @@ class Config(BaseModel, _MutableMappingBase):
         # Look through fields for registry annotations including nested types
         registries: list[Registry] = []
         registry_ids: set[int] = set()
-        for name, field in cls.__pydantic_fields__.items():
+        for name, field in cls.model_fields.items():
             if not (found_registries := extract_registries_from_field_info(field)):
                 continue
 
@@ -189,12 +233,8 @@ class Config(BaseModel, _MutableMappingBase):
                 registry_ids.add(id_)
 
         # Register rebuild callback with each registry found
-        def _cb(_: Any):
-            cls.model_rebuild(force=True, raise_errors=False)
-            log.info(f"Rebuilt {cls} schema due to registry changes.")
-
         for registry in registries:
-            registry._on_register_callbacks.append(_cb)
+            registry._rebuild_on_registers_if_auto_rebuild(cls)
 
     def __draft_pre_init__(self):
         """Called right before a draft config is finalized."""
@@ -435,7 +475,7 @@ class Config(BaseModel, _MutableMappingBase):
         See https://github.com/pydantic/pydantic/discussions/9108#discussioncomment-8926452
         for the original implementation."""
         dumped = next_serializer(self)
-        for name, field_info in type(self).__pydantic_fields__.items():
+        for name, field_info in type(self).model_fields.items():
             if get_origin(field_info.annotation) == Literal:
                 dumped[name] = getattr(self, name)
         return dumped
@@ -516,7 +556,9 @@ class Config(BaseModel, _MutableMappingBase):
         """
         kwargs_with_defaults = _DEFAULT_JSON_DUMP_KWARGS.copy()
         kwargs_with_defaults.update(kwargs)
-        json_str = self.model_dump_json(indent=indent, **kwargs_with_defaults)
+        json_str = self.model_dump_json(
+            indent=indent, **cast(Any, kwargs_with_defaults)
+        )
 
         # Add schema reference if available and with_schema is True
         if with_schema and (schema_uri := _get_schema_uri(type(self))):
@@ -564,7 +606,7 @@ class Config(BaseModel, _MutableMappingBase):
             f.write(json_str)
 
     @classmethod
-    def from_json_str(cls, json_str: str, /):
+    def from_json_str(cls, json_str: str | bytes, /):
         """Create configuration from a JSON string.
 
         Args:
@@ -783,7 +825,7 @@ class Config(BaseModel, _MutableMappingBase):
             )
 
         # We need to convert the config to a dict first
-        config_dict = self.model_dump(**kwargs)
+        config_dict = self.model_dump(**cast(Any, kwargs))
 
         # Then we can use tomli_w to dump the dict to a TOML string
         toml_str = dumps(
@@ -863,13 +905,29 @@ class Config(BaseModel, _MutableMappingBase):
             raise NotImplementedError
 
     def cli_run_subcommand(self) -> Config:
-        from pydantic_settings import CliApp
+        if PYDANTIC_SETTINGS_VERSION < "2.3.0":
+            raise RuntimeError(
+                "The `cli_run_subcommand` method is only available with Pydantic Settings >= 2.3.0. "
+                f"Current version: {PYDANTIC_SETTINGS_VERSION}. "
+                "Please upgrade Pydantic Settings to use this feature."
+            )
 
-        return CliApp.run_subcommand(self)
+        from .root import CLI
+
+        return CLI.run_subcommand(self)
 
     @classmethod
     def cli_available_subcommands(cls) -> list[str]:
-        from pydantic_settings import CliSubCommand
+        if PYDANTIC_SETTINGS_VERSION < "2.3.0":
+            raise RuntimeError(
+                "The `cli_run_subcommand` method is only available with Pydantic Settings >= 2.3.0. "
+                f"Current version: {PYDANTIC_SETTINGS_VERSION}. "
+                "Please upgrade Pydantic Settings to use this feature."
+            )
+
+        from pydantic_settings import (
+            CliSubCommand,  # pyright: ignore[reportAttributeAccessIssue]
+        )
 
         _CliSubCommand = typing.get_args(CliSubCommand)[-1]
 
@@ -883,7 +941,16 @@ class Config(BaseModel, _MutableMappingBase):
         """
         The active subcommand. This is set by the CLI when the config is created.
         """
-        from pydantic_settings import CliSubCommand
+        if PYDANTIC_SETTINGS_VERSION < "2.3.0":
+            raise RuntimeError(
+                "The `cli_run_subcommand` method is only available with Pydantic Settings >= 2.3.0. "
+                f"Current version: {PYDANTIC_SETTINGS_VERSION}. "
+                "Please upgrade Pydantic Settings to use this feature."
+            )
+
+        from pydantic_settings import (
+            CliSubCommand,  # pyright: ignore[reportAttributeAccessIssue]
+        )
 
         _CliSubCommand = typing.get_args(CliSubCommand)[-1]
 
@@ -933,22 +1000,49 @@ def _get_schema_uri(cls: type[Config]) -> str | None:
     return None
 
 
+def _try_set_hash_legacy(cls: type[Config], bases: tuple[type, ...]):
+    if "__hash__" in cls.__dict__:
+        return
+
+    from pydantic_core import PydanticUndefined
+
+    base_hash_func = None
+    for base in bases:
+        base_hash_func = getattr(base, "__hash__", PydanticUndefined)
+        if base_hash_func is not PydanticUndefined:
+            break
+
+    if base_hash_func is None:
+        # This will be the case for `BaseModel` since it defines `__eq__` but not `__hash__`.
+        # In this case, we generate a standard hash function, generally for use with frozen models.
+
+        def hash_func(self: Any) -> int:
+            return hash(self.__class__) + hash(tuple(self.__dict__.values()))
+
+        cls.__hash__ = hash_func  # type: ignore[assignment]
+
+
 def _try_set_hash(cls: type[Config]):
+    # On earlier versions of Pydantic, `set_default_hash_func` has a different signature,
+    # so we need to handle that gracefully.
+    if PYDANTIC_VERSION < "2.6":
+        return _try_set_hash_legacy(cls, cls.__bases__)
+
     # This is a bit of a hack as we're relying on Pydantic's internal API,
     # but we can fail gracefully if it doesn't work.
 
     try:
-        from pydantic._internal._model_construction import set_default_hash_func
+        from pydantic._internal._model_construction import (
+            set_default_hash_func,  # type: ignore
+        )
     except ImportError:
         log.warning(
             "Could not set default hash function for config class. "
-            "This is likely due to a Pydantic version that does not support this feature. "
-            "Please make sure you're using Pydantic >= 2.10. "
-            "If you are and still see this error, please report it to the nshconfig maintainers."
+            "This should not happen. Please report this issue."
         )
         return
 
-    set_default_hash_func(cls, cls.__bases__)
+    set_default_hash_func(cast(Any, cls), cls.__bases__)
     log.debug(f"Default hash function set for class: {cls.__name__}")
 
 
@@ -966,6 +1060,4 @@ def with_config(**config: Unpack[ConfigDict]) -> Callable[[_TypeT], _TypeT]: ...
 def with_config(
     config: ConfigDict | None = None, /, **kwargs: Any
 ) -> Callable[[_TypeT], _TypeT]:
-    from pydantic import with_config
-
-    return with_config(config, **kwargs)  # pyright: ignore[reportArgumentType]
+    return _pydantic_with_config(config, **kwargs)  # pyright: ignore[reportArgumentType]

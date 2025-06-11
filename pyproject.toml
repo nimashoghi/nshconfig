@@ -5,10 +5,20 @@ description = "Fully typed configuration management, powered by Pydantic"
 authors = [{ name = "Nima Shoghi", email = "nimashoghi@gmail.com" }]
 readme = "README.md"
 requires-python = ">=3.9,<4.0"
-dependencies = ["pydantic>=2.10", "typing-extensions", "pydantic-settings", "eval_type_backport; python_version < '3.10'"]
+dependencies = [
+    "pydantic>=2",
+    "typing-extensions",
+    "pydantic-settings",
+    "eval_type_backport; python_version < '3.10'",
+]
 
 [project.optional-dependencies]
-extra = ["treescope; python_version >= '3.10'", "pydantic-yaml", "tomli", "tomli-w"]
+extra = [
+    "treescope; python_version >= '3.10'",
+    "pydantic-yaml",
+    "tomli",
+    "tomli-w",
+]
 yaml = ["pydantic-yaml"]
 toml = ["tomli", "tomli-w"]
 docs = ["sphinx", "sphinx-rtd-theme", "myst-parser", "sphinx-copybutton"]
@@ -23,6 +33,7 @@ ipykernel = "*"
 ipywidgets = "*"
 pytest = "*"
 pytest-cov = "*"
+nox = "*"
 sphinx = { version = "*", optional = true }
 sphinx-rtd-theme = { version = "*", optional = true }
 myst-parser = { version = "*", optional = true }
