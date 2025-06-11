@@ -123,7 +123,9 @@ def _compat_monkey_patch_type_pr_8526():
     from pydantic._internal import _core_utils
 
     def handle_definitions_schema(
-        self, schema: core_schema.DefinitionsSchema, f: _core_utils.Walk
+        self,
+        schema: core_schema.DefinitionsSchema,
+        f: _core_utils.Walk,  # pyright: ignore[reportAttributeAccessIssue]
     ) -> core_schema.CoreSchema:
         new_definitions: list[core_schema.CoreSchema] = []
         for definition in schema["definitions"]:
