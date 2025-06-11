@@ -5,8 +5,7 @@ import copy
 import importlib.util
 import json
 import logging
-import typing
-from collections.abc import Awaitable, Callable, Mapping, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, get_origin, overload
 
@@ -20,7 +19,7 @@ from pydantic import (
 from pydantic import ConfigDict as _ConfigDict
 from typing_extensions import Self, TypedDict, TypeVar, Unpack, override
 
-from .utils import PYDANTIC_SETTINGS_VERSION, PYDANTIC_VERSION, IncEx
+from .utils import PYDANTIC_VERSION, IncEx
 
 try:
     from pydantic import with_config as _pydantic_with_config  # type: ignore
@@ -893,78 +892,6 @@ class Config(BaseModel, _MutableMappingBase):
         """
         toml_str = Path(path).read_text()
         return cls.from_toml_str(toml_str)
-
-    # region CLI
-    # We're just adding this so `cli_cmd` override is visible in the IDE.
-    if TYPE_CHECKING:
-
-        def cli_cmd(self) -> None | Awaitable[None]:
-            """
-            The command to run the CLI. If this is implemented, the CLI will be run with this command.
-            """
-            raise NotImplementedError
-
-    def cli_run_subcommand(self) -> Config:
-        if PYDANTIC_SETTINGS_VERSION < "2.3.0":
-            raise RuntimeError(
-                "The `cli_run_subcommand` method is only available with Pydantic Settings >= 2.3.0. "
-                f"Current version: {PYDANTIC_SETTINGS_VERSION}. "
-                "Please upgrade Pydantic Settings to use this feature."
-            )
-
-        from .root import CLI
-
-        return CLI.run_subcommand(self)
-
-    @classmethod
-    def cli_available_subcommands(cls) -> list[str]:
-        if PYDANTIC_SETTINGS_VERSION < "2.3.0":
-            raise RuntimeError(
-                "The `cli_run_subcommand` method is only available with Pydantic Settings >= 2.3.0. "
-                f"Current version: {PYDANTIC_SETTINGS_VERSION}. "
-                "Please upgrade Pydantic Settings to use this feature."
-            )
-
-        from pydantic_settings import (
-            CliSubCommand,  # pyright: ignore[reportAttributeAccessIssue]
-        )
-
-        _CliSubCommand = typing.get_args(CliSubCommand)[-1]
-
-        return [
-            field_name
-            for field_name, field_info in cls.model_fields.items()
-            if _CliSubCommand in field_info.metadata
-        ]
-
-    def cli_active_subcommand(self) -> str | None:
-        """
-        The active subcommand. This is set by the CLI when the config is created.
-        """
-        if PYDANTIC_SETTINGS_VERSION < "2.3.0":
-            raise RuntimeError(
-                "The `cli_run_subcommand` method is only available with Pydantic Settings >= 2.3.0. "
-                f"Current version: {PYDANTIC_SETTINGS_VERSION}. "
-                "Please upgrade Pydantic Settings to use this feature."
-            )
-
-        from pydantic_settings import (
-            CliSubCommand,  # pyright: ignore[reportAttributeAccessIssue]
-        )
-
-        _CliSubCommand = typing.get_args(CliSubCommand)[-1]
-
-        return next(
-            (
-                field_name
-                for field_name, field_info in type(self).model_fields.items()
-                if _CliSubCommand in field_info.metadata
-                and getattr(self, field_name) is not None
-            ),
-            None,
-        )
-
-    # endregion
 
 
 def _get_schema_uri(cls: type[Config]) -> str | None:

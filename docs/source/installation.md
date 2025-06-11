@@ -9,12 +9,17 @@ pip install nshconfig
 For YAML support, you'll need to install additional dependencies:
 
 ```bash
-pip install "nshconfig[extra]"  # Installs all extras
 pip install "nshconfig[yaml]"   # Installs only the YAML extra
 ```
 
-Alternatively, you can install the YAML dependency directly:
+For TOML support, install:
 
 ```bash
-pip install pydantic-yaml
+pip install "nshconfig[toml]"
+```
+
+You may also install all extras at once:
+
+```bash
+pip install "nshconfig[extra]"
 ```

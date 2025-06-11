@@ -343,4 +343,3 @@ class _CommonPackageVersion(_PackageVersion):
 
 
 PYDANTIC_VERSION = _CommonPackageVersion("pydantic")
-PYDANTIC_SETTINGS_VERSION = _CommonPackageVersion("pydantic_settings")
