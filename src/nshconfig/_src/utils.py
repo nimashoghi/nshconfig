@@ -240,17 +240,13 @@ def resolve_version(
     /,
 ) -> version.Version:
     """Resolve a version string or Version object to a Version object."""
-    match version_input:
-        case str():
-            return version.parse(version_input)
-        case version.Version():
-            return version_input
-        case _PackageVersion():
-            return version_input()
-        case _:
-            raise TypeError(
-                f"Expected str or Version, got {type(version_input).__name__}"
-            )
+    if isinstance(version_input, str):
+        return version.parse(version_input)
+    if isinstance(version_input, version.Version):
+        return version_input
+    if isinstance(version_input, _PackageVersion):
+        return version_input()
+    raise TypeError(f"Expected str or Version, got {type(version_input).__name__}")
 
 
 class _PackageVersion(ABC):

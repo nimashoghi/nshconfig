@@ -62,14 +62,13 @@ PYDANTIC_VERSIONS = _get_pydantic_versions(">=2")
 
 
 def _resolve_python_session(python: str | Sequence[str] | bool | None):
-    match python:
-        case str():
-            return version.parse(python)
-        case False | None:
-            # Current Python version
-            return version.parse(sys.version.split(maxsplit=1)[0])
-        case _:
-            raise ValueError(f"Unsupported Python version specification: {python}")
+    """Return a parsed packaging.version.Version for the given nox python arg."""
+    if isinstance(python, str):
+        return version.parse(python)
+    if python is False or python is None:
+        # `False` and `None` both indicate the current interpreter.
+        return version.parse(sys.version.split(maxsplit=1)[0])
+    raise ValueError(f"Unsupported Python version specification: {python}")
 
 
 @nox.session(python=PYTHON_VERSIONS)
