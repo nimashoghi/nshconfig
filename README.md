@@ -40,12 +40,13 @@ final_config = config.finalize()
 
 ## Key Features
 
-- Draft configs for intuitive configuration creation
-- Multiple configuration formats (Python, JSON, YAML)
-- Dynamic type registry for plugin systems
-- Configuration code generation tools
-- Built-in PyTorch Lightning integration
-- MISSING constant for optional fields
+- **Draft configs** for intuitive configuration creation
+- **Singleton pattern** support (both descriptor and global styles)
+- **Multiple configuration formats** (Python, JSON, YAML)
+- **Dynamic type registry** for plugin systems
+- **Configuration code generation** tools
+- **Built-in PyTorch Lightning integration**
+- **MISSING constant** for optional fields
 
 For detailed examples and API reference, please visit the [documentation](https://nima.sh/nshconfig/).
 

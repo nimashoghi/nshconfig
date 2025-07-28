@@ -13,6 +13,7 @@ from ._src.pydantic_exports import *
 from ._src.registry import Registry as Registry
 from ._src.registry import RegistryConfig as RegistryConfig
 from ._src.singleton import Singleton as Singleton
+from ._src.singleton import singleton as singleton
 from ._src.utils import deduplicate as deduplicate
 from ._src.utils import deduplicate_configs as deduplicate_configs
 

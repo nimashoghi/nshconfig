@@ -16,26 +16,40 @@ class Singleton(Generic[T]):
     """Manages singleton access to a configuration class using the descriptor pattern.
 
     This class provides a way to access a singleton instance of a configuration
-    class through a descriptor that automatically binds to the owner class.
+    class through a descriptor that automatically binds to the owner class, or
+    can be used as a standalone global singleton.
 
-    Example:
+    Example (as descriptor):
         ```python
         class MyConfig(Config):
             singleton: ClassVar[Singleton[Self]] = Singleton()
             attribute: str
         ```
 
-    Inheritance behavior:
+    Example (as global):
+        ```python
+        class MyConfig(Config):
+            attribute: str
+
+        my_config_singleton = singleton(MyConfig)
+        ```
+
+    Inheritance behavior (descriptor mode):
     - A derived class must define its own Singleton instance
     - To share a base class's singleton, explicitly assign it:
       `singleton = BaseClass.singleton`
     """
 
-    def __init__(self) -> None:
-        """Initialize the Singleton."""
+    def __init__(self, cls: type[T] | None = None) -> None:
+        """Initialize the Singleton.
+
+        Args:
+            cls: Optional class type to bind to immediately. If provided,
+                 this singleton can be used as a global without being a descriptor.
+        """
         self._instance: T | None = None
         self._lock = threading.RLock()
-        self._owner_cls: type[T] | None = None
+        self._owner_cls: type[T] | None = cls
         self._reference_classes: set[type[T]] = set()
 
     def __set_name__(self, owner: type[T], name: str) -> None:
@@ -161,10 +175,15 @@ class Singleton(Generic[T]):
         if self._owner_cls is None:
             raise TypeError(
                 "Singleton is not correctly bound to a class. "
-                "Ensure it is assigned as a ClassVar to the configuration class."
+                "Ensure it is assigned as a ClassVar to the configuration class or created with singleton(cls)."
             )
 
-        if cls is not None and cls is not self._owner_cls:
+        # If this is a global singleton (created with singleton(cls)), skip class checking
+        # when cls is None (i.e., when accessing methods directly)
+        if cls is None:
+            return
+
+        if cls is not self._owner_cls:
             # Check for the behavior like the following:
             # class DerivedConfig(BaseConfig):
             #     singleton = BaseConfig.singleton
@@ -188,3 +207,27 @@ class Singleton(Generic[T]):
         owner_name = self._owner_cls.__name__ if self._owner_cls else None
         status = "initialized" if self._instance is not None else "uninitialized"
         return f"<{self.__class__.__name__} owner={owner_name}, status={status}, instance={self._instance}>"
+
+
+def singleton(cls: type[T]) -> Singleton[T]:
+    """Create a global singleton for the given class.
+
+    This function provides a convenient way to create singletons without
+    using the descriptor pattern.
+
+    Args:
+        cls: The class type to create a singleton for.
+
+    Returns:
+        A Singleton instance bound to the given class.
+
+    Example:
+        ```python
+        class MyConfig(Config):
+            value: str
+
+        my_config_singleton = singleton(MyConfig)
+        config = my_config_singleton.initialize(value="test")
+        ```
+    """
+    return Singleton(cls)
