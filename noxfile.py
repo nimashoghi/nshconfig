@@ -10,13 +10,16 @@ import nox
 from packaging import version
 from packaging.specifiers import SpecifierSet
 
+# Use uv for package installation
+nox.options.default_venv_backend = "uv"
+
 
 def _get_pydantic_versions(version_constraint: str) -> list[str]:
     """Get available Pydantic versions that match the given constraint."""
     try:
-        # Get all available versions from PyPI
+        # Get all available versions from PyPI using uv
         result = subprocess.run(
-            ["pip", "index", "versions", "pydantic"],
+            ["uv", "pip", "index", "versions", "pydantic"],
             capture_output=True,
             text=True,
             check=True,
@@ -75,7 +78,7 @@ def _resolve_python_session(python: str | Sequence[str] | bool | None):
 @nox.parametrize("pydantic", PYDANTIC_VERSIONS)
 def tests(session: nox.Session, pydantic: str) -> None:
     """Run tests against different Python and Pydantic versions."""
-    # Install dependencies
+    # Install dependencies using uv
     deps: list[str] = []
     # This package
     deps.append(".[extra]")
@@ -89,6 +92,7 @@ def tests(session: nox.Session, pydantic: str) -> None:
     # Pydantic itself
     deps.append(f"pydantic=={pydantic}")
 
+    # With uv backend, session.install uses uv pip install
     session.install(*deps)
 
     # Run linting and type checking

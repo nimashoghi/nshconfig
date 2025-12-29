@@ -5,24 +5,30 @@ Contributions are welcome! If you find any issues or have suggestions for improv
 ## Development Setup
 
 1. Clone the repository
-2. Install development dependencies:
+2. Install [uv](https://docs.astral.sh/uv/) if you haven't already:
 
-   ```bash
-   pip install -e ".[dev]"
-   ```
+    ```bash
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    ```
 
-3. Install pre-commit hooks:
+3. Install development dependencies:
 
-   ```bash
-   pre-commit install
-   ```
+    ```bash
+    uv sync --all-groups
+    ```
 
 ## Running Tests
 
 To run the test suite:
 
 ```bash
-pytest
+uv run pytest
+```
+
+Or with coverage:
+
+```bash
+uv run pytest --cov=nshconfig --cov-report=term-missing
 ```
 
 ## Building Documentation
@@ -31,7 +37,7 @@ To build the documentation locally:
 
 ```bash
 cd docs
-make html
+uv run sphinx-build -b html source build/html
 ```
 
 The built documentation will be in `docs/build/html`.

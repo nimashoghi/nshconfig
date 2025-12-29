@@ -24,22 +24,19 @@ jobs:
         steps:
             - uses: actions/checkout@v4
 
+            - name: Install uv
+              uses: astral-sh/setup-uv@v5
+
             - name: Set up Python
-              uses: actions/setup-python@v5
-              with:
-                  python-version: "3.10"
-                  cache: pip
+              run: uv python install 3.10
 
             - name: Install dependencies
-              run: |
-                  python -m pip install --upgrade pip
-                  pip install .[docs]
-                  pip install sphinx sphinx-rtd-theme myst-parser sphinx-copybutton
+              run: uv sync --all-groups
 
             - name: Build documentation
               run: |
                   cd docs
-                  sphinx-build -b html source build/html
+                  uv run sphinx-build -b html source build/html
 
             - name: Upload artifact
               uses: actions/upload-pages-artifact@v3

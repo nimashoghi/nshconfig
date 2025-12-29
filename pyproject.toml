@@ -31,25 +31,28 @@ docs = ["sphinx", "sphinx-rtd-theme", "myst-parser", "sphinx-copybutton"]
 [project.urls]
 homepage = "https://github.com/nimashoghi/nshconfig"
 
-[tool.poetry.group.dev.dependencies]
-basedpyright = "*"
-ruff = "*"
-ipykernel = "*"
-ipywidgets = "*"
-pytest = "*"
-pytest-cov = "*"
-nox = "*"
-sphinx = { version = "*", optional = true }
-sphinx-rtd-theme = { version = "*", optional = true }
-myst-parser = { version = "*", optional = true }
-sphinx-copybutton = { version = "*", optional = true }
-
 [project.scripts]
 nshconfig-export = "nshconfig.bin.export:main"
 
+[dependency-groups]
+dev = [
+    "basedpyright",
+    "ruff",
+    "ipykernel",
+    "ipywidgets",
+    "pytest",
+    "pytest-cov",
+    "nox",
+    "packaging",
+    "sphinx",
+    "sphinx-rtd-theme",
+    "myst-parser",
+    "sphinx-copybutton",
+]
+
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["uv_build>=0.9.18,<0.10.0"]
+build-backend = "uv_build"
 
 [tool.basedpyright]
 typeCheckingMode = "standard"

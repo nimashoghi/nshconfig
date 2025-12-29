@@ -16,7 +16,10 @@ def run_tests() -> int:
     project_root = Path(__file__).parent.parent.resolve()
 
     # Build the pytest command with all the options from pyproject.toml
+    # Using uv run to execute within the UV environment
     cmd = [
+        "uv",
+        "run",
         "pytest",
         "tests",
         "--cov=nshconfig",
@@ -28,7 +31,7 @@ def run_tests() -> int:
         result = subprocess.run(cmd, cwd=project_root, check=False)
         return result.returncode
     except FileNotFoundError:
-        print("Error: pytest not found. Please install test dependencies first.")
+        print("Error: uv not found. Please install uv first.")
         return 1
 
 
