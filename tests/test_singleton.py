@@ -235,7 +235,7 @@ def test_inheritance_hierarchies():
 
     # Derived class that explicitly uses the base singleton - opt-in footgun
     class DerivedFootgun(Base):
-        singleton: ClassVar[Singleton[Base]] = Base.singleton  # pyright: ignore[reportIncompatibleVariableOverride]
+        singleton: ClassVar[Singleton[Base]] = Base.singleton
         derived_value: str
 
     # Initialize the Base singleton

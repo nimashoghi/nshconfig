@@ -93,7 +93,7 @@ def _no_configs_registered_invalid_config(registry: Registry) -> type[Config]:
 
         _model_config: ConfigDict = {}
         if PYDANTIC_VERSION >= "2.1.0":
-            _model_config = {"defer_build": True}  # pyright: ignore[reportAssignmentType]
+            _model_config = {"defer_build": True}
 
         class NoConfigsRegisteredInvalidConfig(Config):
             model_config = {**_model_config}

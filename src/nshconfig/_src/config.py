@@ -959,9 +959,7 @@ def _try_set_hash(cls: type[Config]):
     # but we can fail gracefully if it doesn't work.
 
     try:
-        from pydantic._internal._model_construction import (
-            set_default_hash_func,  # type: ignore
-        )
+        from pydantic._internal._model_construction import set_default_hash_func
     except ImportError:
         log.warning(
             "Could not set default hash function for config class. "

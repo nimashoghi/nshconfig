@@ -202,7 +202,7 @@ def test_missing_single_instance():
     assert MissingValue.model_construct() is C.MISSING
 
     if PYDANTIC_VERSION >= "2.4.0":
-        assert MissingValue.model_validate_strings({}) is C.MISSING  # pyright: ignore[reportAttributeAccessIssue]
+        assert MissingValue.model_validate_strings({}) is C.MISSING
 
 
 def test_new_syntax_allow_missing_basic_usage():
