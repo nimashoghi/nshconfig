@@ -13,5 +13,5 @@ uv run --env-file .env basedpyright
 uv run --env-file .env pytest
 
 # 2. Build and Publish
-uv build
+uv build --clear
 uv run --env-file .env uv publish $@
