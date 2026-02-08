@@ -32,6 +32,7 @@ docs = ["sphinx", "sphinx-rtd-theme", "myst-parser", "sphinx-copybutton"]
 homepage = "https://github.com/nimashoghi/nshconfig"
 
 [project.scripts]
+nshconfig = "nshconfig.bin.cli:main"
 nshconfig-export = "nshconfig.bin.export:main"
 
 [dependency-groups]

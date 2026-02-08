@@ -34,6 +34,18 @@ uv run nox -s tests
 ./scripts/publish.sh
 ```
 
+## Claude Code Skill
+
+nshconfig ships a Claude Code skill for library usage guidance. Install it into any project:
+
+```bash
+# Install the skill to <cwd>/.claude/skills/using-nshconfig/
+nshconfig skill install
+
+# Install at user level (~/.claude/skills/using-nshconfig/)
+nshconfig skill install --global
+```
+
 ## Architecture
 
 **Source layout:** `src/nshconfig/` with private implementation in `_src/`.
