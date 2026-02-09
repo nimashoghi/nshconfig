@@ -1,6 +1,6 @@
 [project]
 name = "nshconfig"
-version = "0.54.1"
+version = "0.55.0"
 description = "Fully typed configuration management, powered by Pydantic"
 authors = [{ name = "Nima Shoghi", email = "nimashoghi@gmail.com" }]
 readme = "README.md"
@@ -9,6 +9,7 @@ dependencies = [
     "pydantic>=2",
     "typing-extensions",
     "eval_type_backport; python_version < '3.10'",
+    "nshskill>=0.1.0 ; python_full_version >= '3.10'",
 ]
 
 [project.optional-dependencies]

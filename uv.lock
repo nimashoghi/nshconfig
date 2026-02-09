@@ -1295,6 +1295,7 @@ version = "0.54.1"
 source = { editable = "." }
 dependencies = [
     { name = "eval-type-backport", marker = "python_full_version < '3.10'" },
+    { name = "nshskill", marker = "python_full_version >= '3.10'" },
     { name = "pydantic" },
     { name = "typing-extensions" },
 ]
@@ -1357,6 +1358,7 @@ dev = [
 requires-dist = [
     { name = "eval-type-backport", marker = "python_full_version < '3.10'" },
     { name = "myst-parser", marker = "extra == 'docs'" },
+    { name = "nshskill", marker = "python_full_version >= '3.10'", specifier = ">=0.1.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pydantic-yaml", marker = "extra == 'all'" },
     { name = "pydantic-yaml", marker = "extra == 'extra'" },
@@ -1390,6 +1392,18 @@ dev = [
     { name = "sphinx" },
     { name = "sphinx-copybutton" },
     { name = "sphinx-rtd-theme" },
+]
+
+[[package]]
+name = "nshskill"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyyaml", marker = "python_full_version >= '3.10'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fb/e4/faa55b7ded98356ce40843f49250a3c4fe7f315002afdea67303329f2012/nshskill-0.1.0.tar.gz", hash = "sha256:636d308f34fc5a92d44a6d7e4c2aa292398bc7c5ab6fcfc6ed6f1e1a08401690", size = 5883, upload-time = "2026-02-09T01:42:10.843Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dc/22/59e0a209de3adcb740db24e13b5bf703af3a681b62bf1c5d4db2320f0195/nshskill-0.1.0-py3-none-any.whl", hash = "sha256:8612478edb6520f0c88bcf0a5fe44a5b3fb4d75abc132d15acb5b1e50fcf4716", size = 8115, upload-time = "2026-02-09T01:42:09.778Z" },
 ]
 
 [[package]]
