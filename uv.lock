@@ -1291,7 +1291,7 @@ wheels = [
 
 [[package]]
 name = "nshconfig"
-version = "0.54.1"
+version = "0.56.0"
 source = { editable = "." }
 dependencies = [
     { name = "eval-type-backport", marker = "python_full_version < '3.10'" },
