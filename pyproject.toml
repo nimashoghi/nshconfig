@@ -63,6 +63,9 @@ requires = ["uv_build>=0.9.18,<0.10.0"]
 build-backend = "uv_build"
 
 [tool.basedpyright]
+# typing_probes are golden fixtures (deliberate errors), checked explicitly by
+# tests/test_typing.py; project-wide scans must skip them.
+exclude = ["tests/typing_probes", "**/__pycache__", "**/.venv"]
 typeCheckingMode = "standard"
 deprecateTypingAliases = true
 strictListInference = true
