@@ -1,7 +1,5 @@
 """Golden typing probe: every line here must typecheck cleanly under basedpyright."""
 
-from __future__ import annotations
-
 import nshconfig as C
 
 

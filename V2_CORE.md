@@ -1,21 +1,24 @@
-# nshconfig v2 core: drafts, `derive()`, `finalize()`
+# nshconfig v2 core: drafts, `interp()`, `finalize()`
+
+> **Naming note (as built):** the marker shipped as `interp()` / `Interp` (user decision at
+> build time); this spec was written under the working name `derive()`. The mechanical
+> replacements below have been applied; semantics are unchanged.
+
 
 Date: 2026-06-11. The final shape of the v2 core, converged through interactive prototyping and
 two multi-agent design panels. This document is the authoritative spec; `V2_DESIGN.md` remains
 as the exploration record, and its interpolation mechanisms (`__derive__` hooks at the lowest
 common ancestor, `C.inherit` type-anchored markers) are superseded by the single concept here.
 
-Reference implementation, verified end to end: `v2_prototype/nshv2.py` (~420 lines,
-basedpyright-clean at error level), with `nshv2_smoke.py` (14 assertions) and `nshv2_types.py`
-(typing probe: 3 seeded mistakes fire, good lines pass). A live playground with demos exists at
-`/tmp/nshconfig-option1/` (ephemeral). Every behavioral claim in this document ran in code this
-session; nothing is aspirational.
+Reference implementation: originally prototyped as `v2_prototype/nshv2.py` (now removed;
+see git history at the v2 branch root) and since superseded by the real implementation in
+`src/nshconfig/`, whose test suite ports every verified claim in this document.
 
 ---
 
 ## 1. The design in one paragraph
 
-A config field can hold `derive(lambda c: ...)` anywhere a value can sit: assigned to a draft
+A config field can hold `interp(lambda c: ...)` anywhere a value can sit: assigned to a draft
 field, inside a `model_validate` input dict, or as a class default (including inside
 `Field(default=...)`). It resolves exactly once, inside pydantic's single validation pass,
 reading ancestors (`c.parent`, `c.nearest(Cls)`, always already resolved), the validation root
@@ -24,7 +27,7 @@ reading ancestors (`c.parent`, `c.nearest(Cls)`, always already resolved), the v
 slot; last write wins; `del` re-arms. Nothing pending can reach a final config, a dump, an
 f-string, or an `if` statement without a loud error naming the dotted path and the lambda's
 source line. The whole user-facing vocabulary is three verbs and one value: `Cls.draft()`,
-`C.finalize(draft)`, and `derive(...)`.
+`C.finalize(draft)`, and `interp(...)`.
 
 ```python
 import nshconfig as C
@@ -38,7 +41,7 @@ class EncoderConfig(C.Config):
 
 class HeadConfig(C.Config):
     # class-level interpolation: the same kind of value, sitting in the default slot
-    dim: int = C.derive(lambda c: c.nearest(ModelConfig).dim)
+    dim: int = C.interp(lambda c: c.nearest(ModelConfig).dim)
 
 class ModelConfig(C.Config):
     dim: int = 768
@@ -52,7 +55,7 @@ class TrainConfig(C.Config):
 # notebook composition: instance-level interpolation, the Hydra move
 cfg = TrainConfig.draft()
 cfg.model.dim = 1024
-cfg.model.encoder.ln.dim = C.derive(lambda c: c.nearest(ModelConfig).dim)  # this tree only
+cfg.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)  # this tree only
 final = C.finalize(cfg)
 # final.model.encoder.ln.dim == 1024 (instance marker)
 # final.model.head.dim == 1024       (class-default marker, same machinery)
@@ -89,14 +92,14 @@ typed path proxies (`C.at(Cls).model.dim`): perfect static checking, but cannot 
 conditionals or multi-source compute, so lambdas survive as an escape hatch and two mechanisms
 ship; OmegaConf-compatible strings (`"${model.dim}"`): refactor-invisible, escaping tax,
 class-name matching breaks silently on rename; kept in the drawer as an optional ingestion/CLI
-adapter that compiles to `derive`; declarative selectors (`Inherit(ModelConfig)`): pure data and
+adapter that compiles to `interp`; declarative selectors (`Inherit(ModelConfig)`): pure data and
 cycle-proof, but single-source only, and its `then=` escape hatch reintroduces lambdas anyway.
 
 ---
 
-## 3. The value model: what `derive()` is
+## 3. The value model: what `interp()` is
 
-`derive(fn)` returns a `Derive` marker: a tiny frozen object holding the callable and a source
+`interp(fn)` returns an `Interp` marker: a tiny frozen object holding the callable and a source
 site string (`"<lambda> @ file.py:12"`) captured at construction so errors cite the authoring
 line even after cloudpickle. It is **stateless after construction**, so one instance can occupy
 a class default slot and any number of instance slots concurrently (verified with one shared
@@ -104,14 +107,14 @@ object in both slots resolving identically).
 
 The critical property: **nothing special happens at class definition.** pydantic's metaclass
 special-cases exactly one thing in the assignment position, a `FieldInfo` (what `Field()`
-returns), absorbing it as field *definition*. Anything else, including a `Derive`, is taken
+returns), absorbing it as field *definition*. Anything else, including an `Interp`, is taken
 verbatim as the default *value* (verified: `FieldInfo.default is MARKER`). Consequences, all
 verified:
 
-- `a: int = derive(...)` makes the field defaulted, exactly like `a: int = 32`.
-- `derive` composes with `Field` because they are different kinds: `a: int =
-  Field(default=derive(...), gt=0, description="...")` and
-  `b: Annotated[int, Field(multiple_of=5)] = derive(...)` both work.
+- `a: int = interp(...)` makes the field defaulted, exactly like `a: int = 32`.
+- `interp` composes with `Field` because they are different kinds: `a: int =
+  Field(default=interp(...), gt=0, description="...")` and
+  `b: Annotated[int, Field(multiple_of=5)] = interp(...)` both work.
 - The **resolved** value still passes the field's constraints: a parent value violating `gt=0`
   produces pydantic's ordinary greater-than error on the derived field. Interpolation feeds
   validation; it never bypasses it.
@@ -124,8 +127,8 @@ a `draft(**kwargs)` seed. Markers may satisfy **required** fields (no default sl
 
 Marker hygiene (each silently-corrupting path was demonstrated before being closed):
 `__slots__` so writes into marker-valued objects raise; `__bool__` raises ("refusing to use
-pending derive(...) in a boolean context"); `__format__` raises (an f-string would otherwise
-bake `derive(<...>)` into a string that validates into a `str` field and survives into a frozen
+pending interp(...) in a boolean context"); `__format__` raises (an f-string would otherwise
+bake `interp(<...>)` into a string that validates into a `str` field and survives into a frozen
 final); arithmetic raises naturally (`TypeError: unsupported operand`). One documented sharp
 edge: `==` is identity (raising would break container membership), so two distinct markers
 compare unequal rather than erroring.
@@ -140,7 +143,7 @@ declaration order:
 
 ```python
 v = value.get(name, field.default)
-if isinstance(v, Derive):
+if isinstance(v, Interp):
     value[name] = v.fn(Ctx(stack))     # exceptions wrapped with path + Cls.field + site
 ```
 
@@ -222,8 +225,8 @@ overridden on the base:
 - `__delattr__` (draft): pop value and provenance; re-arm.
 
 `draft()` strips marker defaults that `model_construct` copied into `__dict__` (only non-user-set
-ones; `draft(dim=derive(...))` seeds are kept as user provenance). Pending state is visible: the
-draft repr labels `[pending: instance derive(<fn @ file:line>)]`, `[pending: class default ...]`,
+ones; `draft(dim=interp(...))` seeds are kept as user provenance). Pending state is visible: the
+draft repr labels `[pending: instance interp(<fn @ file:line>)]`, `[pending: class default ...]`,
 `<untouched SubConfig>`, and `[UNSET]`, and omits materialized static defaults as noise.
 
 Everything else is pydantic natively: `isinstance(draft, Cls)` is True; equality, deepcopy,
@@ -275,7 +278,7 @@ is correct, since a bare instance cannot know its tree; a marker reading only it
 Verified with basedpyright against the prototype:
 
 **Statically checked**: the lambda's declared return type against the field annotation, at the
-class-default slot AND the draft-assignment slot (`derive(lambda c: "oops")` into an `int` field
+class-default slot AND the draft-assignment slot (`interp(lambda c: "oops")` into an `int` field
 is an edit-time error at both); draft assignment types and attribute names (via the
 `TYPE_CHECKING` gating); helper signatures (`def boltz_large(cfg: TrainConfig)`); `finalize`'s
 `(C) -> C`; everything in and around the lambda except its body.
@@ -286,7 +289,7 @@ resolved value as the runtime backstop; anchor reachability (`nearest(ModelConfi
 encloses type-checks, fails at finalize with the chain); which instance is "nearest" (runtime
 semantics by definition).
 
-**The contained lies, with their gates**: `derive(...)` claims type `T` while being a marker
+**The contained lies, with their gates**: `interp(...)` claims type `T` while being a marker
 (gate: hygiene dunders plus the no-survivors sweep; same precedent as `Field()`); draft mutation
 on a frozen-typed class type-checks only because pyright does not enforce
 `model_config = ConfigDict(frozen=True)` (only the class-kwarg spelling), which is exactly what
@@ -317,7 +320,7 @@ Two hardening requirements were discovered empirically and are mandatory:
 Policy: pickles are transport, JSON is the record. Finals dump concrete values only (structural
 guarantee: nothing symbolic survives section 6's sweep). Pending drafts have no textual
 serialization, deliberately; if "serializable pending configs" ever becomes a need, the panel's
-string-form work (OmegaConf-style templates compiling to `derive` markers, plus
+string-form work (OmegaConf-style templates compiling to `interp` markers, plus
 `dump_draft`/`load_draft`) is the designed-but-not-shipped adapter.
 
 ---
@@ -329,7 +332,7 @@ string-form work (OmegaConf-style templates compiling to `derive` markers, plus
 | `${..dim}` (relative parent) | `c.parent.dim`, or `c.nearest(Cls).dim` | `nearest` is the restructure-proof form: anchored on meaning, not hop count; disambiguates teacher/student nesting per-subtree (verified) |
 | `${model.dim}` (root absolute) | `c.root.model.dim` | sibling subtrees reachable; raw input + class defaults |
 | `${oc.env:...}`, custom resolvers | the lambda body is Python | no resolver registry; environment access is a visible `os.environ` read in code (discouraged in favor of explicit fields) |
-| interpolation in YAML at compose time | `derive(...)` assigned at compose time | the instance-level act, on drafts or dict input |
+| interpolation in YAML at compose time | `interp(...)` assigned at compose time | the instance-level act, on drafts or dict input |
 | config groups / defaults lists | plain functions mutating drafts | `def boltz_large(cfg): ...` |
 | lazy resolution at access time | rejected | resolve-once-at-finalize; a run record is dead data |
 | unresolved `${...}` persisting in saved YAML | rejected (drawer: string adapter) | finals are concrete by construction |
@@ -349,7 +352,7 @@ redesign.
 
 | Piece | LOC | Role |
 |---|---|---|
-| `Derive` + `derive()` | ~45 | the value: fn, site, hygiene dunders, typed factory |
+| `Interp` + `interp()` | ~45 | the value: fn, site, hygiene dunders, typed factory |
 | `_View` + `Ctx` | ~90 | navigation views, did-you-mean, pending-read guard |
 | `_interpolation_scope` | ~45 | the wrap validator: stack, labels, one-rule resolution, re-entrancy guard, fields_set scrub, root sweep trigger |
 | `_assert_no_pending` | ~18 | the no-survivors sweep |

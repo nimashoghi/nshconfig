@@ -5,8 +5,6 @@ Finals render with default-valued fields dimmed; drafts render their pending sta
 (``[pending: instance ...]`` / ``[pending: class default ...]``) and unset fields.
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, Any
 
 from .interp import Interp
@@ -17,10 +15,10 @@ if TYPE_CHECKING:
 
 
 def render_config(
-    obj: BaseModel,
-    path: str | None,
-    subtree_renderer: renderers.TreescopeSubtreeRenderer,
-) -> rendering_parts.Rendering:
+    obj: "BaseModel",
+    path: "str | None",
+    subtree_renderer: "renderers.TreescopeSubtreeRenderer",
+) -> "rendering_parts.Rendering":
     from treescope import rendering_parts
 
     from .config import Config, is_draft

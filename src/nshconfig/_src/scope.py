@@ -5,21 +5,16 @@ Defined at module level (not in the class body) so cloudpickle of notebook-defin
 by value and drag in the unpicklable ``ContextVar``. See V2_CORE.md sections 4 and 8.
 """
 
-from __future__ import annotations
-
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel
 
-from .interp import _READS, Ctx, Interp
-
-if TYPE_CHECKING:
-    from .interp import Stack
+from .interp import _READS, Ctx, Interp, Stack
 
 __all__ = ["interpolation_scope"]
 
-_STACK: ContextVar[Stack] = ContextVar("nshconfig_stack", default=())
+_STACK: "ContextVar[Stack]" = ContextVar("nshconfig_stack", default=())
 _IN_RESOLVER: ContextVar[bool] = ContextVar("nshconfig_in_resolver", default=False)
 
 
@@ -39,7 +34,7 @@ def _key_in_parent(parent_data: dict[str, Any], child: Any) -> str | None:
     return None
 
 
-def _dotted(stack: Stack, field: str) -> str:
+def _dotted(stack: "Stack", field: str) -> str:
     labels = [lbl for _, _, lbl in stack if lbl is not None]
     return ".".join([*labels, field])
 

@@ -1,7 +1,5 @@
 """Draft/finalize lifecycle: construction, vivification, del, freezing, equality."""
 
-from __future__ import annotations
-
 import pytest
 from pydantic import ValidationError
 

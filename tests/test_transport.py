@@ -5,8 +5,6 @@ cloudpickled BY VALUE) ships to a process that has only the library, arrives as 
 draft, finalizes there, and can still explain itself.
 """
 
-from __future__ import annotations
-
 import pickle
 import subprocess
 import sys

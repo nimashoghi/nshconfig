@@ -6,25 +6,21 @@ happens at class definition. It is legal anywhere a value sits (a draft assignme
 through one rule inside the validation pass (see ``scope.py``).
 """
 
-from __future__ import annotations
-
 import difflib
 from contextvars import ContextVar
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, TypeVar, cast
-
-from typing_extensions import override
+from typing import Any, Callable, TypeAlias, TypeVar, cast
 
 from pydantic import BaseModel
+from typing_extensions import override
 
 __all__ = ["Ctx", "Interp", "interp"]
 
 T = TypeVar("T")
 
 # stack entry: (model class, in-progress input dict, key label in parent or None)
-if TYPE_CHECKING:
-    StackEntry = tuple[type[BaseModel], dict[str, Any], "str | None"]
-    Stack = tuple[StackEntry, ...]
+StackEntry: TypeAlias = "tuple[type[BaseModel], dict[str, Any], str | None]"
+Stack: TypeAlias = "tuple[StackEntry, ...]"
 
 # Read-log recorder: while a marker's fn runs, _View reads append (dotted path, value
 # repr) here so provenance can answer "derived BECAUSE x = v". Inactive (None) outside
@@ -43,7 +39,7 @@ class Interp:
 
     __slots__ = ("fn", "site")
 
-    def __init__(self, fn: Callable[[Ctx], Any]):
+    def __init__(self, fn: "Callable[[Ctx], Any]"):
         self.fn = fn
         code = getattr(fn, "__code__", None)
         name = getattr(fn, "__name__", type(fn).__name__)
@@ -70,7 +66,7 @@ class Interp:
         raise DraftError(f"refusing to format pending {self!r} into a string")
 
 
-def interp(fn: Callable[[Ctx], T]) -> T:
+def interp(fn: "Callable[[Ctx], T]") -> T:
     """Mark a field value as interpolated from the surrounding config tree.
 
     Returns an ``Interp`` marker at runtime; typed as ``T`` (the same contained lie

@@ -11,8 +11,6 @@ Plus provenance: ``C.explain(cfg, "optim.lr")`` answers "why did this run use th
 value", down to file:line and the interpolation's "because" chain.
 """
 
-from __future__ import annotations
-
 from importlib.metadata import PackageNotFoundError, version
 
 from ._src.config import Config as Config

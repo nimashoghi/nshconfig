@@ -4,8 +4,6 @@ Also: ``thaw`` (final -> fresh draft seeded only from explicit provenance, so
 bump-and-refinalize re-derives interpolated values instead of pinning them).
 """
 
-from __future__ import annotations
-
 from typing import Any, TypeVar
 
 from pydantic import BaseModel

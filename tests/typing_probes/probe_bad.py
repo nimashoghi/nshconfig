@@ -4,8 +4,6 @@ The expected (line, rule) pairs are asserted by tests/test_typing.py; keep the
 markers and this file's line numbers in sync via the BAD: comments.
 """
 
-from __future__ import annotations
-
 import nshconfig as C
 
 

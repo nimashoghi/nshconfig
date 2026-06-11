@@ -1,7 +1,5 @@
 """The V2_CORE.md section-1 scenario, end to end (the first acceptance script)."""
 
-from __future__ import annotations
-
 import pytest
 from pydantic import ValidationError
 

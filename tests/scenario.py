@@ -1,7 +1,5 @@
 """The canonical scenario tree from V2_CORE.md, importable by test modules."""
 
-from __future__ import annotations
-
 import nshconfig as C
 
 

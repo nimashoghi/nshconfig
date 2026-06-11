@@ -5,8 +5,6 @@ instance path where it happened, the owning ``Cls.field``, and, when a marker is
 involved, the marker's source site captured at construction.
 """
 
-from __future__ import annotations
-
 __all__ = ["DraftError", "UnsetError"]
 
 

@@ -4,8 +4,6 @@ Ported from the design panel's verified T-series battery (semU), adapted to the
 v2 API, plus the Field/Annotated composition checks from the playground session.
 """
 
-from __future__ import annotations
-
 from typing import Annotated
 
 import pytest

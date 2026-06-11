@@ -1,7 +1,5 @@
 """Treescope extra: pending state and default-dimming render in notebooks."""
 
-from __future__ import annotations
-
 import pytest
 
 import nshconfig as C

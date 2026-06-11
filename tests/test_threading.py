@@ -1,7 +1,5 @@
 """Free-threading posture: all draft and resolution state is instance/context-local."""
 
-from __future__ import annotations
-
 import threading
 
 import nshconfig as C

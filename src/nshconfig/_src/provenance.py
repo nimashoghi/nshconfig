@@ -13,22 +13,18 @@ Storage note: event chains live in instance ``__dict__`` under a dunder key; the
 so two value-identical configs with different histories stay equal (see config.py).
 """
 
-from __future__ import annotations
-
 import linecache
 import sys
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from types import FrameType
+from typing import Any, Literal
 
 from pydantic import BaseModel
 from typing_extensions import override
 
 from .interp import Interp
-
-if TYPE_CHECKING:
-    from types import FrameType
 
 __all__ = ["Event", "Explanation", "explain", "provenance", "source"]
 
@@ -49,7 +45,7 @@ class source:
     def __init__(self, label: str):
         self.label = label
 
-    def __enter__(self) -> source:
+    def __enter__(self) -> "source":
         self._token = _LABEL.set(self.label)
         return self
 

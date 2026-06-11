@@ -10,8 +10,6 @@ Fix: never construct during unpickling; build the real object lazily on first
 attribute access. Properly an upstream pydantic fix; shipped here as a contained shim.
 """
 
-from __future__ import annotations
-
 import copyreg
 from typing import Any
 

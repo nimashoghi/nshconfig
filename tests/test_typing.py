@@ -6,8 +6,6 @@ must stay completely clean. A pyright release that breaks either half of this is
 canary firing, not a flake.
 """
 
-from __future__ import annotations
-
 import json
 import subprocess
 import sys

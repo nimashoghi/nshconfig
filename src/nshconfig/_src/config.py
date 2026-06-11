@@ -8,8 +8,6 @@ The dunders are hidden from the type checker so basedpyright keeps pydantic's
 declared attribute semantics on drafts: typo'd draft writes are STATIC errors.
 """
 
-from __future__ import annotations
-
 import difflib
 from typing import TYPE_CHECKING, Any, cast
 

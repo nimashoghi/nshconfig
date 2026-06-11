@@ -52,11 +52,7 @@ reportImplicitOverride = "warning"
 reportIncompatibleMethodOverride = "information"
 
 [tool.ruff.lint]
-select = ["FA102", "FA100"]
-ignore = ["F722", "F821", "E731", "E741"]
-
-[tool.ruff.lint.isort]
-required-imports = ["from __future__ import annotations"]
+ignore = ["E731", "E741"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,7 +1,5 @@
 """Provenance: sites, chains, labels, explain, and the interp read-log."""
 
-from __future__ import annotations
-
 import pickle
 from pathlib import Path
 
@@ -9,7 +7,7 @@ import nshconfig as C
 from tests.scenario import ModelConfig, TrainConfig
 
 
-def set_lr_helper(cfg: OptimRoot) -> None:
+def set_lr_helper(cfg: "OptimRoot") -> None:
     cfg.optim.lr = 3e-4
 
 

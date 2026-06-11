@@ -1,12 +1,10 @@
-from __future__ import annotations
-
 import os
 import sys
 
 sys.path.insert(0, os.path.abspath("../.."))
 
 project = "nshconfig"
-copyright = "2024"
+copyright = "2024-2026"
 author = "nshconfig contributors"
 
 extensions = [
@@ -35,7 +33,6 @@ templates_path = ["_templates"]
 exclude_patterns = []
 
 html_theme = "sphinx_rtd_theme"
-html_static_path = ["_static"]
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),

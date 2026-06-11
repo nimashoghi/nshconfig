@@ -1,7 +1,5 @@
 """The failure inventory: every degradation is loud and names its location."""
 
-from __future__ import annotations
-
 from typing import Any
 
 import pytest
