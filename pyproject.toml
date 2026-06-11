@@ -64,8 +64,15 @@ build-backend = "uv_build"
 
 [tool.basedpyright]
 # typing_probes are golden fixtures (deliberate errors), checked explicitly by
-# tests/test_typing.py; project-wide scans must skip them.
-exclude = ["tests/typing_probes", "**/__pycache__", "**/.venv"]
+# tests/test_typing.py; project-wide scans must skip them. Setting `exclude`
+# REPLACES pyright's defaults, so restate them (node_modules, __pycache__, and
+# dot-dirs like .venv/.nox) or the scan descends into every local venv.
+exclude = [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.*",
+    "tests/typing_probes",
+]
 typeCheckingMode = "standard"
 deprecateTypingAliases = true
 strictListInference = true

@@ -1,0 +1,19 @@
+{
+    // Dedicated project config for the golden typing probes. The repo-root
+    // pyproject.toml excludes this directory so project-wide scans (publish.sh,
+    // editors) skip the deliberate errors in probe_bad.py; tests/test_typing.py
+    // re-checks the probes under THIS config via `basedpyright -p`. Keep the
+    // rules below in sync with [tool.basedpyright] in pyproject.toml (minus the
+    // exclude) so the probes are judged by the same rules as the project.
+    "typeCheckingMode": "standard",
+    "deprecateTypingAliases": true,
+    "strictListInference": true,
+    "strictDictionaryInference": true,
+    "strictSetInference": true,
+    "reportPrivateImportUsage": "none",
+    "reportMatchNotExhaustive": "warning",
+    "reportOverlappingOverload": "warning",
+    "reportUnnecessaryTypeIgnoreComment": "warning",
+    "reportImplicitOverride": "warning",
+    "reportIncompatibleMethodOverride": "information"
+}

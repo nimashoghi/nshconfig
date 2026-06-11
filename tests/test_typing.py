@@ -4,6 +4,12 @@ V2_CORE.md section 7: the lambda's return type is checked at both slots, draft
 writes are statically checked (the TYPE_CHECKING-gated dunders), and the ok-probe
 must stay completely clean. A pyright release that breaks either half of this is a
 canary firing, not a flake.
+
+The repo-root pyproject.toml excludes tests/typing_probes so project-wide scans
+(publish.sh, editors) skip probe_bad.py's deliberate errors -- and pyright honors
+that exclude even for files named on the command line. So we check the probes
+under their own pyrightconfig.json (same rules, no exclude) via ``-p``, pinning
+import resolution to this venv's interpreter with ``--pythonpath``.
 """
 
 import json
@@ -18,7 +24,15 @@ REPO = Path(__file__).parent.parent
 def _basedpyright(*files: Path) -> list[dict]:
     exe = Path(sys.executable).parent / "basedpyright"
     r = subprocess.run(
-        [str(exe), "--outputjson", *map(str, files)],
+        [
+            str(exe),
+            "--outputjson",
+            "-p",
+            str(PROBES / "pyrightconfig.json"),
+            "--pythonpath",
+            sys.executable,
+            *map(str, files),
+        ],
         capture_output=True,
         text=True,
         cwd=REPO,

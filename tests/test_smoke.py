@@ -57,7 +57,7 @@ def test_finalize_idempotent_and_frozen():
     f = C.finalize(TrainConfig.config_draft())
     assert C.finalize(f) is f
     with pytest.raises(ValidationError):
-        f.batch = 1  # type: ignore[misc]  # frozen final
+        f.batch = 1  # frozen final (runtime gate; statically legal, see typing ledger)
 
 
 def test_draft_is_real_instance_with_loud_gates():

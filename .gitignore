@@ -188,6 +188,8 @@ poetry.toml
 
 # LSP config files
 pyrightconfig.json
+# ... except the golden typing-probe project config (see tests/test_typing.py)
+!tests/typing_probes/pyrightconfig.json
 
 ### VisualStudioCode ###
 .vscode/*
