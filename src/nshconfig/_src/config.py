@@ -120,6 +120,12 @@ class Config(BaseModel):
                         bits.append(f"{name}=[UNSET]")
         return f"<draft {type(self).__name__}({', '.join(bits)})>"
 
+    def __treescope_repr__(self, path: str | None, subtree_renderer: Any) -> Any:
+        # Optional rich notebook rendering; only invoked by treescope itself.
+        from .treescope import render_config
+
+        return render_config(self, path, subtree_renderer)
+
     # The draft dunders are hidden from the type checker so basedpyright keeps
     # pydantic's declared attribute semantics (an ungated __getattr__ would turn
     # every unknown attribute into Any and silently disable checking on drafts).

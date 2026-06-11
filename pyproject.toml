@@ -17,6 +17,7 @@ homepage = "https://github.com/nimashoghi/nshconfig"
 [dependency-groups]
 dev = [
     "basedpyright",
+    "treescope",
     "ruff",
     "pytest",
     "pytest-cov",
