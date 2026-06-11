@@ -8,7 +8,7 @@ from tests.scenario import ModelConfig, TrainConfig
 
 
 def test_scenario_end_to_end():
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     cfg.model.dim = 1024
     cfg.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)
     cfg.model.decoder.ln.dim = 64
@@ -23,7 +23,7 @@ def test_scenario_end_to_end():
 
 
 def test_instance_marker_overridden_and_rearmed():
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     cfg.model.dim = 512
     cfg.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)
     cfg.model.encoder.ln.dim = 17  # concrete write wins (last write)
@@ -46,22 +46,22 @@ def test_dict_input_marker_no_drafts():
 
 
 def test_untouched_and_zero_touch_trees_derive():
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     cfg.model.dim = 4096  # touch ONLY the knob
     f = C.finalize(cfg)
     assert f.model.head.dim == 4096
-    assert C.finalize(TrainConfig.draft()).model.head.dim == 768
+    assert C.finalize(TrainConfig.config_draft()).model.head.dim == 768
 
 
 def test_finalize_idempotent_and_frozen():
-    f = C.finalize(TrainConfig.draft())
+    f = C.finalize(TrainConfig.config_draft())
     assert C.finalize(f) is f
     with pytest.raises(ValidationError):
         f.batch = 1  # type: ignore[misc]  # frozen final
 
 
 def test_draft_is_real_instance_with_loud_gates():
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     assert isinstance(cfg, TrainConfig)
     assert C.is_draft(cfg) and not C.is_draft(C.finalize(cfg))
     with pytest.raises(C.UnsetError, match="interpolated"):
@@ -83,7 +83,7 @@ def test_shared_marker_object_in_both_slots():
         model: ModelConfig
         probe: Probe
 
-    t = Train2.draft()
+    t = Train2.config_draft()
     t.model.dim = 96
     t.probe.b = width  # the very same object, instance slot
     f = C.finalize(t)

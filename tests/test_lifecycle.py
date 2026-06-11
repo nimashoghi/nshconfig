@@ -13,13 +13,13 @@ def test_nested_helper_needs_no_ceremony():
     def my_config_(config: TrainConfig) -> None:
         config.model.encoder.ln.eps = 1e-6
 
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     my_config_(cfg)
     assert C.finalize(cfg).model.encoder.ln.eps == 1e-6
 
 
 def test_draft_seeds_are_explicit_provenance():
-    cfg = ModelConfig.draft(dim=512)
+    cfg = ModelConfig.config_draft(dim=512)
     assert cfg.dim == 512
     assert "dim" in cfg.__pydantic_fields_set__
     final = C.finalize(cfg)
@@ -27,7 +27,7 @@ def test_draft_seeds_are_explicit_provenance():
 
 
 def test_vivified_children_are_present_but_not_user_set():
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     _ = cfg.model.encoder  # vivify two levels
     assert "model" not in cfg.__pydantic_fields_set__
     assert C.is_draft(cfg.model) and C.is_draft(cfg.model.encoder)
@@ -37,7 +37,7 @@ def test_del_restores_default_then_missing_error():
     class Strict(C.Config):
         steps: int  # required, no default
 
-    d = Strict.draft()
+    d = Strict.config_draft()
     d.steps = 5
     del d.steps
     with pytest.raises(ValidationError) as ei:
@@ -56,13 +56,13 @@ def test_missing_errors_are_per_leaf_for_untouched_subtrees():
         enc: Enc
 
     with pytest.raises(ValidationError) as ei:
-        C.finalize(Root.draft())
+        C.finalize(Root.config_draft())
     locs = [e["loc"] for e in ei.value.errors()]
     assert ("enc", "ln", "dim") in locs  # leaf-level, not "enc: Field required"
 
 
 def test_finalize_non_destructive_sweep_loop():
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     cfg.model.dim = 256
     f1 = C.finalize(cfg)
     cfg.model.dim = 512  # the draft stays live
@@ -75,13 +75,13 @@ def test_reading_unset_required_is_loud():
         steps: int
 
     with pytest.raises(C.UnsetError, match="not set on this draft"):
-        _ = Strict.draft().steps
+        _ = Strict.config_draft().steps
 
 
 def test_equality_and_hash_ignore_history():
-    a = TrainConfig.draft()
+    a = TrainConfig.config_draft()
     a.model.dim = 100
-    b = TrainConfig.draft()
+    b = TrainConfig.config_draft()
     with C.source("other-history"):
         b.model.dim = 50
         b.model.dim = 100
@@ -92,7 +92,7 @@ def test_equality_and_hash_ignore_history():
 
 
 def test_exclude_unset_dump_reflects_explicit_provenance_only():
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     cfg.model.dim = 1024
     final = C.finalize(cfg)
     dump = final.model_dump(exclude_unset=True)
@@ -100,7 +100,7 @@ def test_exclude_unset_dump_reflects_explicit_provenance_only():
 
 
 def test_thaw_rederives_interpolation():
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     cfg.model.dim = 1024
     cfg.model.decoder.ln.dim = 64  # explicit leaf override
     x = C.finalize(cfg)
@@ -114,7 +114,7 @@ def test_thaw_rederives_interpolation():
 
 
 def test_whole_subconfig_assignment_is_fully_explicit():
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     cfg.model.encoder = EncoderConfig(ln=LNConfig(dim=8))
     final = C.finalize(cfg)
     assert final.model.encoder.ln.dim == 8
@@ -123,7 +123,7 @@ def test_whole_subconfig_assignment_is_fully_explicit():
 
 def test_draft_equals_final_when_values_match():
     # Equality is data-equality; lifecycle stage is queried via is_draft.
-    cfg = ModelConfig.draft()
+    cfg = ModelConfig.config_draft()
     cfg.dim = 768
     cfg.encoder = EncoderConfig(ln=LNConfig())
     cfg.decoder = DecoderConfig(ln=LNConfig())

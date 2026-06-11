@@ -1,10 +1,10 @@
 # Drafts and finalize
 
 A draft is a **real instance** of your config class (`isinstance(draft, Cls)` is true),
-created by `Cls.draft(**seeds)` without validation. It behaves like a plain mutable object:
+created by `Cls.config_draft(**seeds)` without validation. It behaves like a plain mutable object:
 
 ```python
-cfg = TrainConfig.draft()
+cfg = TrainConfig.config_draft()
 cfg.model.encoder.ln.eps = 1e-6   # nested configs auto-create on first access
 cfg.batch = 16
 del cfg.batch                     # re-arms the default (or interpolation rule)
@@ -14,7 +14,7 @@ Properties worth knowing:
 
 - **Auto-vivification**: accessing an untouched `Config`-typed field creates a child draft, so
   helpers can reach arbitrarily deep into a fresh draft with zero ceremony.
-- **Seeds are explicit**: `Cls.draft(dim=1024)` counts as user-set provenance, like a write.
+- **Seeds are explicit**: `Cls.config_draft(dim=1024)` counts as user-set provenance, like a write.
 - **Reads are honest**: a set field reads back its value; an unset required field raises
   `UnsetError`; a field whose value would come from interpolation raises `UnsetError` telling
   you to finalize first. Reads never return placeholder objects.
@@ -28,11 +28,13 @@ Properties worth knowing:
 
 ## finalize
 
-`C.finalize(draft)` is the one validation boundary, and does exactly two things: resolve
+`draft.config_finalize()` is the one validation boundary, and does exactly two things: resolve
 interpolation (inside pydantic's validation pass) and validate the whole tree once. The result
 is frozen, hashable, equal-by-value, and contains concrete values only.
 
-- **Idempotent**: `C.finalize(final) is final`, so boundary code can normalize defensively.
+- **Idempotent**: `final.config_finalize() is final` (and `C.finalize(final) is final`; the
+  module verbs are functional aliases of the methods), so boundary code can normalize
+  defensively.
 - **Non-destructive**: the draft stays live; tweak-and-refinalize is the sweep loop.
 - **Per-leaf errors**: untouched required subtrees are expanded, so a missing field reports
   `model.encoder.ln.dim: Field required`, not `model: Field required`, annotated with
@@ -42,13 +44,13 @@ is frozen, hashable, equal-by-value, and contains concrete values only.
 
 ## thaw
 
-`C.thaw(final)` returns a fresh draft seeded *only* from explicitly-set values. Interpolated
+`final.config_thaw()` returns a fresh draft seeded *only* from explicitly-set values. Interpolated
 and defaulted values are not seeded, so they re-derive against your tweaks:
 
 ```python
-t = C.thaw(yesterdays_run)
+t = yesterdays_run.config_thaw()
 t.model.dim = 2048           # bump the knob...
-new = C.finalize(t)          # ...every interpolated value follows; overrides stick
+new = t.config_finalize()    # ...every interpolated value follows; overrides stick
 ```
 
 Invariant: `C.finalize(C.thaw(x)) == x` when nothing changed.

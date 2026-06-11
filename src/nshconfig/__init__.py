@@ -1,14 +1,16 @@
 """nshconfig v2: typed, provenance-aware configuration for ML runs.
 
-Three verbs and one value:
+One verb family and one value:
 
-- ``Cls.draft()`` makes a mutable draft (plain assignment, auto-vivifying nesting).
+- ``Cls.config_draft()`` makes a mutable draft (plain assignment, auto-vivifying nesting).
 - ``C.interp(lambda c: ...)`` is a VALUE that resolves against the config tree at
   validation, legal anywhere a value sits (draft assignment, input dict, class default).
-- ``C.finalize(draft)`` resolves, validates once, and returns a frozen final.
+- ``draft.config_finalize()`` resolves, validates once, and returns a frozen final;
+  ``config_thaw`` / ``config_explain`` / ``config_provenance`` / ``config_is_draft``
+  complete the family. Module functions (``finalize``, ``explain``, ...) are aliases.
 
-Plus provenance: ``C.explain(cfg, "optim.lr")`` answers "why did this run use that
-value", down to file:line and the interpolation's "because" chain.
+Plus provenance: ``final.config_explain("optim.lr")`` answers "why did this run use
+that value", down to file:line and the interpolation's "because" chain.
 """
 
 from importlib.metadata import PackageNotFoundError, version

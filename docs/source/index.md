@@ -23,11 +23,11 @@ class ModelConfig(C.Config):
     dim: int = 768
     ln: LNConfig
 
-cfg = ModelConfig.draft()
+cfg = ModelConfig.config_draft()
 cfg.dim = 1024
-final = C.finalize(cfg)
+final = cfg.config_finalize()
 assert final.ln.dim == 1024
-print(C.explain(final, "ln.dim"))
+print(final.config_explain("ln.dim"))
 ```
 
 ```{toctree}

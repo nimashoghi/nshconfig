@@ -6,7 +6,9 @@ description: Build typed, provenance-aware Python configs with nshconfig v2 (Pyd
 # nshconfig v2
 
 Configuration library on Pydantic (>=2.13, Python >=3.10). Import as `import nshconfig as C`.
-Three verbs and one value: `Cls.draft()`, `C.finalize(draft)`, and `C.interp(lambda c: ...)`.
+One verb family and one value: `config_draft` / `config_finalize` / `config_thaw` /
+`config_explain` / `config_provenance` / `config_is_draft`, plus `C.interp(lambda c: ...)`.
+Module-level functional aliases (`C.finalize(cfg)`, `C.explain(cfg, path)`, ...) also exist.
 
 ## Config classes
 
@@ -29,17 +31,17 @@ no default): drafts auto-create them, and finalize fills untouched required subt
 ## Drafts and finalize
 
 ```python
-cfg = TrainConfig.draft()      # a REAL TrainConfig instance, mutable, unvalidated
+cfg = TrainConfig.config_draft()      # a REAL TrainConfig instance, mutable, unvalidated
 cfg.optim.lr = 1e-4            # nested configs auto-create on access; no ceremony
 cfg.steps = 10_000
-final = C.finalize(cfg)        # resolve interpolation -> validate ONCE -> frozen
+final = cfg.config_finalize()        # resolve interpolation -> validate ONCE -> frozen
 ```
 
 - Helpers are plain functions mutating drafts (`def large(cfg): cfg.model.dim = 1024`); they
   replace Hydra config groups.
 - `del cfg.optim.lr` re-arms the default (or interpolation rule). Last write wins.
 - finalize is idempotent and non-destructive: tweak the draft and finalize again (sweep loop).
-- `C.thaw(final)` gives a fresh draft seeded only from explicitly-set values, so interpolated
+- `final.config_thaw()` gives a fresh draft seeded only from explicitly-set values, so interpolated
   values re-derive after a tweak.
 - Drafts refuse `model_dump()` (loud `DraftError`); finals dump concrete values only.
 - Reading an unset/pending draft field raises `UnsetError`; typos raise with a did-you-mean.
@@ -79,7 +81,7 @@ pending; `==` on markers is identity.
 with C.source("sweep:lr"):       # optional semantic label
     cfg.optim.lr = 1e-4
 
-print(C.explain(final, "optim.lr"))
+print(final.config_explain("optim.lr"))
 # optim.lr = 0.0001
 #   set to 0.0001 at sweep.py:12 in <module>  [sweep:lr]   | cfg.optim.lr = 1e-4
 #   set to 0.0003 at configs/base.py:7 in base_config      | cfg.optim.lr = 3e-4
@@ -88,7 +90,7 @@ print(C.explain(final, "optim.lr"))
 
 Every draft write records file:line, function, and source text automatically (helpers become
 provenance units). Interp events record the marker's site plus what it read ("because
-model.dim = 1024"). `C.provenance(cfg)` returns the full path -> events table. Works on drafts
+model.dim = 1024"). `cfg.config_provenance()` returns the full path -> events table. Works on drafts
 and finals; survives pickling.
 
 ## Transport
@@ -112,5 +114,8 @@ path, owning `Cls.field`, and the lambda's `file:line` site.
   explicitly (`def helper(cfg: "TrainConfig")`).
 - Type checker: basedpyright. The lambda's RETURN type is checked at both slots; the lambda
   body is dynamically typed (`c` navigations return Any), like pydantic's `default_factory`.
+- Verb names: a user field named exactly `config_finalize` (etc.) takes full priority and
+  the method vanishes for that class; module verbs (`C.finalize`) always work. `config_*`
+  fields like `config_name` are NOT policed: no warnings, ever.
 - Direct construction does not see ancestors: `LNConfig()` with an ancestor-needing rule fails
   loudly; use the draft path or pass the value explicitly.

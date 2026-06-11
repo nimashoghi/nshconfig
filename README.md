@@ -4,17 +4,17 @@ Typed, provenance-aware configuration for ML runs, powered by [Pydantic](https:/
 
 **[Documentation](https://nima.sh/nshconfig/)**
 
-Three verbs and one value:
+One verb family and one value:
 
-- `Cls.draft()` gives a mutable draft: plain Python assignment, nested configs auto-create,
+- `Cls.config_draft()` gives a mutable draft: plain Python assignment, nested configs auto-create,
   validation deferred.
 - `C.interp(lambda c: ...)` is a **value** that resolves against the config tree at validation.
   It is legal anywhere a value sits: assigned on a draft, inside a `model_validate` dict, or as
   a class default. This is Hydra-style interpolation, in Python, mostly type-checked.
-- `C.finalize(draft)` resolves interpolation, validates once, and returns a frozen, hashable,
+- `draft.config_finalize()` resolves interpolation, validates once, and returns a frozen, hashable,
   fully-concrete config.
 
-Plus provenance: `C.explain(cfg, "optim.lr")` answers *"why did this run use that value?"* down
+Plus provenance: `final.config_explain("optim.lr")` answers *"why did this run use that value?"* down
 to file, line, function, source text, and the interpolation's "because" chain.
 
 ## Install
@@ -53,18 +53,18 @@ class TrainConfig(C.Config):
 def large(cfg: TrainConfig) -> None:
     cfg.model.dim = 1024
 
-cfg = TrainConfig.draft()
+cfg = TrainConfig.config_draft()
 large(cfg)
 # instance-level interpolation: wire THIS tree only, at composition time
 cfg.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)
 
-final = C.finalize(cfg)            # the one validation boundary
+final = cfg.config_finalize()            # the one validation boundary
 assert final.model.encoder.ln.dim == 1024   # followed the knob
 assert final.model.head.dim == 1024         # class-default rule, same machinery
 final.model_dump_json()                     # concrete values only: the run record
 
 # why did this run use that value?
-print(C.explain(final, "model.head.dim"))
+print(final.config_explain("model.head.dim"))
 # model.head.dim = 1024
 #   interpolated to 1024 by <lambda> @ configs.py:11 (class default)
 #       because model.dim = 1024

@@ -15,7 +15,7 @@ def test_concurrent_drafts_are_isolated():
     def worker(i: int) -> None:
         try:
             barrier.wait()
-            cfg = TrainConfig.draft()
+            cfg = TrainConfig.config_draft()
             cfg.model.dim = 100 + i
             cfg.model.encoder.ln.dim = C.interp(lambda c, i=i: c.root.model.dim + i)
             for _ in range(50):  # interleave writes across threads
@@ -48,7 +48,7 @@ def test_concurrent_finalize_of_shared_classes():
         try:
             barrier.wait()
             for _ in range(25):
-                cfg = TrainConfig.draft()
+                cfg = TrainConfig.config_draft()
                 cfg.model.dim = i * 1000
                 out[i] = C.finalize(cfg).model.head.dim
         except BaseException as e:  # noqa: BLE001

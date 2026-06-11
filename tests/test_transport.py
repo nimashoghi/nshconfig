@@ -35,7 +35,7 @@ class TrainConfig(C.Config):
 
 
 def test_cloudpickle_roundtrip_pending_draft_stays_live():
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     cfg.width = 100
     cfg.model.dim = C.interp(lambda c: c.root.width * 2)
     cfg2 = pickle.loads(cloudpickle.dumps(cfg))
@@ -47,19 +47,19 @@ def test_cloudpickle_roundtrip_pending_draft_stays_live():
 
 def test_plain_pickle_policy():
     # lambdas do not plain-pickle: loud, documented; cloudpickle is the channel.
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     cfg.model.dim = C.interp(lambda c: c.root.width)
     with pytest.raises(Exception):
         pickle.dumps(cfg)
     # named module-level resolvers plain-pickle fine:
-    cfg2 = TrainConfig.draft()
+    cfg2 = TrainConfig.config_draft()
     cfg2.model.dim = C.interp(_double_width)
     assert C.finalize(pickle.loads(pickle.dumps(cfg2))).model.dim == 1024
     # markerless drafts and finals plain-pickle fine:
-    cfg3 = TrainConfig.draft()
+    cfg3 = TrainConfig.config_draft()
     cfg3.width = 7
     assert pickle.loads(pickle.dumps(cfg3)).width == 7
-    f = C.finalize(TrainConfig.draft())
+    f = C.finalize(TrainConfig.config_draft())
     assert pickle.loads(pickle.dumps(f)) == f
     assert pickle.loads(cloudpickle.dumps(f)) == f
 
@@ -90,7 +90,7 @@ class TrainConfig(C.Config):
     width: int = 512
     model: ModelConfig
 
-cfg = TrainConfig.draft()
+cfg = TrainConfig.config_draft()
 cfg.model.dim = 2048
 cfg.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)  # pending!
 pathlib.Path({payload!r}).write_bytes(cloudpickle.dumps(cfg))

@@ -21,7 +21,7 @@ class OptimRoot(C.Config):
 
 
 def test_override_chain_with_sites_and_labels():
-    cfg = OptimRoot.draft()
+    cfg = OptimRoot.config_draft()
     set_lr_helper(cfg)  # the helper IS the provenance unit, automatically
     with C.source("sweep:lr"):
         cfg.optim.lr = 1e-4
@@ -39,7 +39,7 @@ def test_override_chain_with_sites_and_labels():
 
 
 def test_del_tombstone_in_chain():
-    cfg = OptimRoot.draft()
+    cfg = OptimRoot.config_draft()
     cfg.optim.lr = 5e-4
     del cfg.optim.lr
     ex = C.explain(cfg, "optim.lr")
@@ -48,13 +48,13 @@ def test_del_tombstone_in_chain():
 
 
 def test_seed_events_recorded():
-    cfg = OptimConfig.draft(lr=2e-4)
+    cfg = OptimConfig.config_draft(lr=2e-4)
     (ev,) = C.explain(cfg, "lr").events
     assert ev.kind == "seed" and ev.value == "0.0002"
 
 
 def test_interp_event_carries_site_and_reads():
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     cfg.model.dim = 1024
     final = C.finalize(cfg)
     ex = C.explain(final, "model.head.dim")
@@ -66,7 +66,7 @@ def test_interp_event_carries_site_and_reads():
 
 
 def test_instance_marker_event_not_injected():
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     cfg.model.dim = 256
     cfg.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)
     final = C.finalize(cfg)
@@ -77,7 +77,7 @@ def test_instance_marker_event_not_injected():
 
 
 def test_rule_active_vs_shadowed_states():
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     cfg.model.head.dim = 7
     assert "(shadowed)" in str(C.explain(cfg, "model.head.dim"))
     del cfg.model.head.dim
@@ -86,7 +86,7 @@ def test_rule_active_vs_shadowed_states():
 
 
 def test_explain_works_on_drafts_mid_composition():
-    cfg = OptimRoot.draft()
+    cfg = OptimRoot.config_draft()
     cfg.optim.lr = 9e-4
     ex = C.explain(cfg, "optim.lr")
     assert ex.current == "0.0009"
@@ -94,7 +94,7 @@ def test_explain_works_on_drafts_mid_composition():
 
 
 def test_provenance_table_full_tree():
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     cfg.model.dim = 1024
     cfg.model.decoder.ln.dim = 64
     table = C.provenance(C.finalize(cfg))
@@ -103,7 +103,7 @@ def test_provenance_table_full_tree():
 
 
 def test_provenance_survives_pickle():
-    cfg = OptimRoot.draft()
+    cfg = OptimRoot.config_draft()
     set_lr_helper(cfg)
     final = pickle.loads(pickle.dumps(C.finalize(cfg)))
     (ev,) = C.explain(final, "optim.lr").events
@@ -116,7 +116,7 @@ def test_value_reprs_are_truncated_not_retained():
     class Holder(C.Config):
         items: list[int] = []
 
-    cfg = Holder.draft()
+    cfg = Holder.config_draft()
     cfg.items = big
     (ev,) = C.explain(cfg, "items").events
     assert ev.value is not None and len(ev.value) <= 80  # repr, truncated, never the object

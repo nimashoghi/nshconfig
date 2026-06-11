@@ -1,7 +1,9 @@
 # Quickstart
 
-The whole user-facing vocabulary is three verbs and one value: `Cls.draft()`,
-`C.finalize(draft)`, `C.thaw(final)`, and `C.interp(lambda c: ...)`.
+The whole user-facing vocabulary is one verb family and one value:
+`config_draft` / `config_finalize` / `config_thaw` / `config_explain` / `config_provenance` /
+`config_is_draft`, plus `C.interp(lambda c: ...)`. Module-level functional aliases
+(`C.finalize(cfg)`, `C.explain(cfg, path)`, ...) exist for functional style.
 
 ## Define configs
 
@@ -49,12 +51,12 @@ immutable and hashable), and `validate_default=True`.
 import nshconfig as C
 from myproj.configs import TrainConfig, ModelConfig, large
 
-cfg = TrainConfig.draft()          # a REAL TrainConfig instance, mutable, unvalidated
+cfg = TrainConfig.config_draft()          # a REAL TrainConfig instance, mutable, unvalidated
 large(cfg)                         # helpers mutate drafts
 cfg.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)  # this tree only
 cfg.model.decoder = ...            # nested configs auto-create on access; no ceremony
 
-final = C.finalize(cfg)            # resolve interpolation -> validate ONCE -> frozen
+final = cfg.config_finalize()            # resolve interpolation -> validate ONCE -> frozen
 final.model_dump_json(indent=2)    # the run record: concrete values only
 ```
 
@@ -69,10 +71,10 @@ rule, a static default, or a required-missing error at finalize).
 ```python
 for lr in (1e-4, 3e-4, 1e-3):
     cfg.optim.lr = lr
-    submit(train, C.finalize(cfg))
+    submit(train, cfg.config_finalize())
 ```
 
-To tweak an existing final: `t = C.thaw(final)` gives a fresh draft seeded only from
+To tweak an existing final: `t = final.config_thaw()` gives a fresh draft seeded only from
 explicitly-set values, so interpolated values re-derive after your tweak.
 
 ## Why did this run use that value?
@@ -81,7 +83,7 @@ explicitly-set values, so interpolated values re-derive after your tweak.
 with C.source("sweep:lr"):
     cfg.optim.lr = 1e-4
 
-print(C.explain(C.finalize(cfg), "optim.lr"))
+print(cfg.config_finalize().config_explain("optim.lr"))
 # optim.lr = 0.0001
 #   set to 0.0001 at sweep.py:12 in <module>  [sweep:lr]   | cfg.optim.lr = 1e-4
 #   set to 0.0003 at configs/base.py:7 in base_config      | cfg.optim.lr = 3e-4

@@ -9,7 +9,7 @@ treescope = pytest.importorskip("treescope")
 
 
 def test_draft_renders_pending_labels():
-    cfg = TrainConfig.draft()
+    cfg = TrainConfig.config_draft()
     cfg.model.dim = 1024
     _ = cfg.model.head  # vivify so the pending class-default rule is visible
     text = treescope.render_to_text(cfg)
@@ -20,7 +20,7 @@ def test_draft_renders_pending_labels():
 
 
 def test_final_renders_with_concrete_values():
-    final = C.finalize(TrainConfig.draft())
+    final = C.finalize(TrainConfig.config_draft())
     text = treescope.render_to_text(final)
     assert "pending" not in text
     assert "768" in text

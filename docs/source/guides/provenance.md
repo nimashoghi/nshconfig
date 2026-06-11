@@ -10,17 +10,17 @@ def base_config(cfg: TrainConfig) -> None:
     cfg.optim.lr = 3e-4
 
 # notebook / sweep script
-cfg = TrainConfig.draft()
+cfg = TrainConfig.config_draft()
 base_config(cfg)                  # the helper IS a provenance unit, automatically
 with C.source("sweep:lr"):        # optional label for a block of writes
     cfg.optim.lr = 1e-4
-final = C.finalize(cfg)
+final = cfg.config_finalize()
 ```
 
 ## explain
 
 ```python
-print(C.explain(final, "optim.lr"))
+print(final.config_explain("optim.lr"))
 # optim.lr = 0.0001
 #   set to 0.0001 at sweep.py:12 in <module>  [sweep:lr]   | cfg.optim.lr = 1e-4
 #   set to 0.0003 at base.py:3 in base_config              | cfg.optim.lr = 3e-4
@@ -33,7 +33,7 @@ print(C.explain(final, "optim.lr"))
 *and what it read*, the "because" chain that bottoms out at human actions:
 
 ```python
-print(C.explain(final, "model.head.dim"))
+print(final.config_explain("model.head.dim"))
 # model.head.dim = 1024
 #   interpolated to 1024 by <lambda> @ configs.py:11 (class default)
 #       because model.dim = 1024
@@ -45,7 +45,7 @@ The rule line reports `(active)` when the class-default interpolation governs th
 
 ## The full table
 
-`C.provenance(cfg)` returns `{dotted_path: [Event, ...]}` for the whole tree; useful for
+`cfg.config_provenance()` returns `{dotted_path: [Event, ...]}` for the whole tree; useful for
 logging the complete "who set what" story into a run record next to `config.json`.
 
 ## Properties

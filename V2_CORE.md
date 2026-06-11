@@ -2,7 +2,12 @@
 
 > **Naming note (as built):** the marker shipped as `interp()` / `Interp` (user decision at
 > build time); this spec was written under the working name `derive()`. The mechanical
-> replacements below have been applied; semantics are unchanged.
+> replacements below have been applied; semantics are unchanged. Post-spec addition: the
+> module verbs gained method sugar, a ``config_*`` family on instances
+> (``cfg.config_finalize()``, ``config_thaw``, ``config_explain``, ``config_provenance``,
+> ``config_is_draft``; ``Cls.config_draft()`` replaces ``draft()``), dispatched via
+> ``__getattr__`` so a user field with the exact same name takes full priority with no
+> warning and the module verbs remain the universal fallback.
 
 
 Date: 2026-06-11. The final shape of the v2 core, converged through interactive prototyping and

@@ -9,7 +9,8 @@ declared attribute semantics on drafts: typo'd draft writes are STATIC errors.
 """
 
 import difflib
-from typing import TYPE_CHECKING, Any, cast
+from types import MethodType
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 from pydantic import BaseModel, ConfigDict, model_validator
 from typing_extensions import Self, override
@@ -19,6 +20,9 @@ from .errors import DraftError, UnsetError
 from .interp import Interp
 from .provenance import record_del, record_seeds, record_write
 from .scope import interpolation_scope
+
+if TYPE_CHECKING:
+    from .provenance import Event, Explanation
 
 __all__ = ["Config", "is_draft"]
 
@@ -33,6 +37,46 @@ def is_draft(obj: Any) -> bool:
     )
 
 
+def _verb_config_finalize(self: "Config") -> "Config":
+    from .finalize import finalize
+
+    return finalize(self)
+
+
+def _verb_config_thaw(self: "Config") -> "Config":
+    from .finalize import thaw
+
+    return thaw(self)
+
+
+def _verb_config_explain(self: "Config", path: str) -> "Explanation":
+    from .provenance import explain
+
+    return explain(self, path)
+
+
+def _verb_config_provenance(self: "Config") -> "dict[str, list[Event]]":
+    from .provenance import provenance
+
+    return provenance(self)
+
+
+# The config_* verb family, dispatched from Config.__getattr__ rather than living as
+# class attributes. This is what makes the collision story exact: a user field named
+# config_finalize leaves NO parent attribute to shadow, so it gets true field
+# semantics (required stays required, no pydantic shadow warning), and the verb
+# simply does not exist on that class. The module-level verbs (C.finalize etc.)
+# remain the universal fallback. Deliberately NOT policed via protected_namespaces:
+# fields like config_name / config_path stay warning-free.
+_VERBS: dict[str, tuple[Callable[..., Any], bool]] = {  # name -> (impl, is_property)
+    "config_finalize": (_verb_config_finalize, False),
+    "config_thaw": (_verb_config_thaw, False),
+    "config_explain": (_verb_config_explain, False),
+    "config_provenance": (_verb_config_provenance, False),
+    "config_is_draft": (is_draft, True),
+}
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, validate_default=True)
 
@@ -43,11 +87,12 @@ class Config(BaseModel):
     )
 
     @classmethod
-    def draft(cls, **values: Any) -> Self:
+    def config_draft(cls, **values: Any) -> Self:
         """A mutable draft of this config: plain assignment, validation deferred.
 
-        Nested ``Config``-typed fields auto-vivify on access; ``C.finalize(draft)``
-        is the one validation boundary. Seed values count as explicit provenance.
+        Nested ``Config``-typed fields auto-vivify on access;
+        ``draft.config_finalize()`` is the one validation boundary. Seed values
+        count as explicit provenance.
         """
         m = cls.model_construct(**values)
         # Strip marker DEFAULTS materialized by model_construct; keep user-passed
@@ -124,6 +169,35 @@ class Config(BaseModel):
 
         return render_config(self, path, subtree_renderer)
 
+    # ---- the config_* verb family ----
+    # Dispatched from __getattr__ at runtime (a declared field by the same name wins,
+    # exactly, because the verb then never exists on that class); plain methods to the
+    # type checker so calls and return types are fully checked. The module-level verbs
+    # (C.finalize, C.thaw, C.explain, ...) remain the canonical functional layer
+    # underneath; these are pure DX sugar over them.
+    if TYPE_CHECKING:
+
+        def config_finalize(self) -> Self:
+            """Resolve interpolation, validate once, return the frozen final."""
+            ...
+
+        def config_thaw(self) -> Self:
+            """A fresh draft seeded only from explicitly-set values."""
+            ...
+
+        def config_explain(self, path: str) -> Explanation:
+            """Why does ``path`` have its value? Sites, chains, and because-lines."""
+            ...
+
+        def config_provenance(self) -> dict[str, list[Event]]:
+            """The full provenance table: dotted path -> event chain."""
+            ...
+
+        @property
+        def config_is_draft(self) -> bool:
+            """True while this config is a mutable, unvalidated draft."""
+            ...
+
     # The draft dunders are hidden from the type checker so basedpyright keeps
     # pydantic's declared attribute semantics (an ungated __getattr__ would turn
     # every unknown attribute into Any and silently disable checking on drafts).
@@ -147,29 +221,32 @@ class Config(BaseModel):
             BaseModel.__setattr__(self, name, value)
 
         def __getattr__(self, name):
-            try:
-                return BaseModel.__getattr__(self, name)
-            except AttributeError:
-                fields = type(self).__pydantic_fields__
-                if is_draft(self) and name in fields:
-                    f = fields[name]
-                    if isinstance(f.default, Interp):
-                        # BEFORE auto-vivification, so an interpolated
-                        # config-typed field cannot silently shadow its marker.
-                        raise UnsetError(
-                            f"{type(self).__name__}.{name} is interpolated "
-                            f"({f.default!r}); read it after finalize(), or "
-                            "assign a value first"
-                        )
-                    ann = f.annotation
-                    if isinstance(ann, type) and issubclass(ann, Config):
-                        child = ann.draft()
-                        self.__dict__[name] = child  # present, but NOT user-set
-                        return child
+            # Field semantics FIRST: pydantic's __getattr__ can return raw class
+            # attributes (e.g. a _ConfigVerb shadowed by a declared field), so an
+            # unset declared field on a draft must be handled before delegating.
+            fields = type(self).__pydantic_fields__
+            if is_draft(self) and name in fields:
+                f = fields[name]
+                if isinstance(f.default, Interp):
+                    # BEFORE auto-vivification, so an interpolated config-typed
+                    # field cannot silently shadow its marker.
                     raise UnsetError(
-                        f"{type(self).__name__}.{name} is not set on this draft"
+                        f"{type(self).__name__}.{name} is interpolated "
+                        f"({f.default!r}); read it after finalize(), or "
+                        "assign a value first"
                     )
-                raise
+                ann = f.annotation
+                if isinstance(ann, type) and issubclass(ann, Config):
+                    child = ann.config_draft()
+                    self.__dict__[name] = child  # present, but NOT user-set
+                    return child
+                raise UnsetError(
+                    f"{type(self).__name__}.{name} is not set on this draft"
+                )
+            if name in _VERBS:
+                impl, prop = _VERBS[name]
+                return impl(self) if prop else MethodType(impl, self)
+            return BaseModel.__getattr__(self, name)
 
         def __delattr__(self, name):
             if is_draft(self) and name in type(self).__pydantic_fields__:

@@ -6,7 +6,7 @@ The flagship flow: compose a draft in a notebook, ship it to a cluster, finalize
 import cloudpickle
 
 # notebook side: classes may live in the notebook itself (__main__)
-cfg = TrainConfig.draft()
+cfg = TrainConfig.config_draft()
 cfg.model.dim = 2048
 cfg.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)  # still pending!
 payload = cloudpickle.dumps(cfg)

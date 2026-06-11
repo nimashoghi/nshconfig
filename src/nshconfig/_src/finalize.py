@@ -96,4 +96,4 @@ def thaw(final: C) -> C:
             continue
         v = fdict.get(name)
         seeds[name] = thaw(v) if isinstance(v, Config) and not is_draft(v) else v
-    return cls.draft(**seeds)
+    return cls.config_draft(**seeds)

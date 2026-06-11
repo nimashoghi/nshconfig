@@ -92,13 +92,13 @@ class Lvl(C.Config):
 
 
 def test_t1_class_default_marker_fills_absent_field():
-    d = TrainConfig.draft()
+    d = TrainConfig.config_draft()
     d.model.dim = 1024
     assert C.finalize(d).model.encoder.ln.dim == 1024
 
 
 def test_t2_instance_marker_on_plain_classes():
-    d = PlainTrain.draft()
+    d = PlainTrain.config_draft()
     d.model.encoder.ln.dim = C.interp(lambda c: c.nearest(PlainModel).dim)
     d.model.dim = 320
     assert C.finalize(d).model.encoder.ln.dim == 320
@@ -117,68 +117,68 @@ def test_t3_marker_as_plain_dict_input_value():
 
 
 def test_t5_precedence_ladder_and_del():
-    d = TrainConfig.draft()
+    d = TrainConfig.config_draft()
     d.model.encoder.ln.dim = 7
     assert C.finalize(d).model.encoder.ln.dim == 7  # concrete beats class marker
     del d.model.encoder.ln.dim
     assert C.finalize(d).model.encoder.ln.dim == 768  # del re-arms class marker
 
-    d = TrainConfig.draft()
+    d = TrainConfig.config_draft()
     d.model.dim = 100
     d.model.dim = 200
     assert C.finalize(d).model.dim == 200  # last write wins
 
-    d = TrainConfig.draft()
+    d = TrainConfig.config_draft()
     d.model.dim = 10
     d.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim * 2)
     d.model.encoder.ln.dim = 5
     assert C.finalize(d).model.encoder.ln.dim == 5  # marker then concrete
 
-    d = TrainConfig.draft()
+    d = TrainConfig.config_draft()
     d.model.dim = 10
     d.model.encoder.ln.dim = 5
     d.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim * 2)
     assert C.finalize(d).model.encoder.ln.dim == 20  # concrete then marker
 
-    d = PlainTrain.draft()
+    d = PlainTrain.config_draft()
     d.model.encoder.ln.eps = C.interp(lambda c: c.root.width / 100)
     del d.model.encoder.ln.eps
     assert C.finalize(d).model.encoder.ln.eps == 1e-5  # del marker -> static default
 
-    d = PairReq.draft()
+    d = PairReq.config_draft()
     d.r.x = C.interp(lambda c: c.root.width)
     del d.r.x
     with pytest.raises(ValidationError):  # del marker on required -> missing
         C.finalize(d)
 
-    d = PlainTrain.draft()
+    d = PlainTrain.config_draft()
     del d.model.dim  # never set: no-op
     assert C.finalize(d).model.dim == 768
 
 
 def test_t6_marker_satisfies_required_field():
-    d = PairReq.draft()
+    d = PairReq.config_draft()
     d.r.x = C.interp(lambda c: c.root.width)
     assert C.finalize(d).r.x == 64
 
-    d = PairReq.draft()
-    d.r = ReqX.draft(x=C.interp(lambda c: c.root.width))  # marker via draft(**kwargs)
+    d = PairReq.config_draft()
+    d.r = ReqX.config_draft(x=C.interp(lambda c: c.root.width))  # marker via draft(**kwargs)
     assert C.finalize(d).r.x == 64
 
 
 def test_t7_ancestor_frames_resolved_root_descent_raw():
-    d = TrainConfig.draft()
+    d = TrainConfig.config_draft()
     d.model.dim = C.interp(lambda c: c.root.width * 2)
     f = C.finalize(d)
     assert f.model.dim == 1024
     assert f.model.encoder.ln.dim == 1024  # class marker chains off RESOLVED ancestor
 
-    d = PlainTrain.draft()
+    d = PlainTrain.config_draft()
     d.model.dim = C.interp(lambda c: c.root.width * 2)
     d.model.encoder.ln.dim = C.interp(lambda c: c.nearest(PlainModel).dim)
     assert C.finalize(d).model.encoder.ln.dim == 1024  # chain via nearest() frame
 
-    d = PlainTrain.draft()
+    d = PlainTrain.config_draft()
     d.model.dim = C.interp(lambda c: c.root.width * 2)
     d.model.encoder.ln.dim = C.interp(lambda c: c.root.model.dim)  # raw frame!
     with pytest.raises(ValidationError, match="pending interpolation"):
@@ -186,34 +186,34 @@ def test_t7_ancestor_frames_resolved_root_descent_raw():
 
 
 def test_t8_sibling_reads_via_root():
-    d = Pair.draft()
+    d = Pair.config_draft()
     d.b.y = 7
     d.a.x = C.interp(lambda c: c.root.b.y)  # a validates BEFORE b
     assert C.finalize(d).a.x == 7
 
-    d = Pair.draft()
+    d = Pair.config_draft()
     d.a.x = 3
     d.b.y = C.interp(lambda c: c.root.a.x)  # b validates AFTER a
     assert C.finalize(d).b.y == 3
 
-    d = Pair.draft()
+    d = Pair.config_draft()
     d.a.x = C.interp(lambda c: c.root.b.y)  # b untouched: static class default
     assert C.finalize(d).a.x == 0
 
 
 def test_t10_same_level_declaration_order():
-    d = Lvl.draft()
+    d = Lvl.config_draft()
     d.b = C.interp(lambda c: c.data.a * 2)
     d.c2 = C.interp(lambda c: c.data.b + 1)  # reads the RESOLVED b (earlier in order)
     f = C.finalize(d)
     assert (f.b, f.c2) == (20, 21)
 
-    d = Lvl.draft()
+    d = Lvl.config_draft()
     d.a = C.interp(lambda c: c.data.b)  # later field, concrete
     d.b = 5
     assert C.finalize(d).a == 5
 
-    d = Lvl.draft()
+    d = Lvl.config_draft()
     d.a = C.interp(lambda c: c.data.b)  # later field untouched: static default
     assert C.finalize(d).a == 2
 
@@ -227,12 +227,12 @@ def test_t11_below_reads_into_own_subtree():
         x: int = 0
         leaf: PlainLeaf
 
-    d = PlainMid.draft()
+    d = PlainMid.config_draft()
     d.x = C.interp(lambda c: c.data.leaf.z)
     d.leaf.z = 9
     assert C.finalize(d).x == 9  # below-read of user-set value
 
-    d = PlainMid.draft()
+    d = PlainMid.config_draft()
     d.x = C.interp(lambda c: c.data.leaf.y)  # leaf untouched: static default
     assert C.finalize(d).x == 5
 
@@ -278,7 +278,7 @@ def test_nearest_disambiguates_per_subtree():
         teacher: ModelConfig
         student: ModelConfig
 
-    d = Distill.draft()
+    d = Distill.config_draft()
     d.teacher.dim = 1024
     d.student.dim = 256
     f = C.finalize(d)

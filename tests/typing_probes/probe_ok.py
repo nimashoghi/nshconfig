@@ -18,10 +18,17 @@ def helper(cfg: ModelConfig) -> None:
     cfg.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)  # instance slot
 
 
-cfg = ModelConfig.draft()
+cfg = ModelConfig.config_draft()
 helper(cfg)
 final = C.finalize(cfg)  # typed (C) -> C
 value: int = final.ln.dim
 explained: C.Explanation = C.explain(final, "ln.dim")
 with C.source("sweep:lr"):
     cfg.dim = 2048
+
+# the config_* verb family is fully typed as methods
+final2: ModelConfig = cfg.config_finalize()
+thawed: ModelConfig = final2.config_thaw()
+exp2: C.Explanation = final2.config_explain("ln.dim")
+table: dict[str, list[C.Event]] = final2.config_provenance()
+flag: bool = cfg.config_is_draft
