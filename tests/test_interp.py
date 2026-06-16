@@ -260,10 +260,13 @@ def test_field_and_annotated_composition():
 
 
 def test_ctx_typed_and_untyped_selectors():
+    class WidthRoot(C.Config):
+        width: int = 17
+
     class Leaf(C.Config):
         own: int = 2
         from_root_untyped: int = C.interp(lambda c: c.root().width)
-        from_root_typed: int = C.interp(lambda c: c.root(PlainTrain).width)
+        from_root_typed: int = C.interp(lambda c: c.root(WidthRoot).width)
         from_parent_typed: int = C.interp(lambda c: c.parent(PlainModel).dim)
         from_self_typed: int = C.interp(lambda c: c.self(Leaf).own)
 
@@ -271,7 +274,7 @@ def test_ctx_typed_and_untyped_selectors():
         dim: int = 9
         leaf: Leaf
 
-    class RootTrain(PlainTrain):
+    class RootTrain(WidthRoot):
         model: Model
 
     d = RootTrain.config_draft()
