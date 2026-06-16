@@ -25,7 +25,7 @@ default slot when the key is absent.
 |---|---|---|
 | `c.self()` / `c.self(Cls)` | same level | own fields; earlier-declared markers already resolved |
 | `c.parent()` / `c.parent(Cls)` | `${..x}` | one level up; ancestor frames are always resolved |
-| `c.up(n)` / `c.up(n, Cls)` | `${...x}` | exactly `n` ancestor hops up |
+| `c.parent(n)` / `c.parent(n, Cls)` | `${...x}` | exactly `n` ancestor hops up |
 | `c.root()` / `c.root(Cls)` | `${a.b}` | the validation root; raw input + class defaults, incl. sibling subtrees |
 | `c.nearest(Cls)` | (no equivalent) | nearest enclosing `Cls` instance, ancestors only |
 
@@ -59,7 +59,7 @@ feeds validation rather than bypassing it.
 
 ## Ordering and the one-pass rule
 
-Each scope resolves *before* descending, so ancestor reads (`c.parent()`, `c.up(...)`,
+Each scope resolves *before* descending, so ancestor reads (`c.parent()`, `c.parent(n)`,
 `c.nearest(...)`) always
 see resolved values, and same-level chains work in declaration order. Dotted descent from
 `c.root()` sees raw input plus static class defaults: a sibling value that is *itself* still

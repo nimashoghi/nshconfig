@@ -23,7 +23,7 @@ def helper(cfg: ModelConfig) -> None:
     cfg.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)  # instance slot
     cfg.ln.dim = C.interp(lambda c: c.self(LNConfig).dim)
     cfg.ln.dim = C.interp(lambda c: c.parent(ModelConfig).dim)
-    cfg.ln.dim = C.interp(lambda c: c.up(1, ModelConfig).dim)
+    cfg.ln.dim = C.interp(lambda c: c.parent(1, ModelConfig).dim)
     cfg.ln.dim = C.interp(lambda c: c.root(TrainConfig).scale)
     cfg.ln.dim = C.interp(lambda c: c.root().dynamic.path)  # untyped selector stays dynamic
 

@@ -82,7 +82,7 @@ mid-composition and finalize on the far side, provenance included.
 |---|---|---|
 | `c.self()` / `c.self(Cls)` | same level | own fields, earlier markers already resolved |
 | `c.parent()` / `c.parent(Cls)` | `${..x}` | one level up, resolved |
-| `c.up(n)` / `c.up(n, Cls)` | `${...x}` | exactly `n` ancestor hops up |
+| `c.parent(n)` / `c.parent(n, Cls)` | `${...x}` | exactly `n` ancestor hops up |
 | `c.root()` / `c.root(Cls)` | `${a.b}` | the validation root, incl. sibling subtrees |
 | `c.nearest(Cls)` | (none: better) | nearest enclosing `Cls`; survives restructuring |
 

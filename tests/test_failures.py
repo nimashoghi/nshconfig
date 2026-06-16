@@ -38,19 +38,19 @@ def test_parent_at_validation_root_is_loud():
         C.finalize(d)
 
 
-def test_up_invalid_depth_is_loud():
+def test_parent_invalid_depth_is_loud():
     class Root(C.Config):
         note: str = "x"
 
     d = Root.config_draft()
-    d.note = C.interp(lambda c: c.up(0).note)
-    with pytest.raises(ValidationError, match=r"up\(\) levels must be >= 1"):
+    d.note = C.interp(lambda c: c.parent(0).note)
+    with pytest.raises(ValidationError, match=r"parent\(\) levels must be >= 1"):
         C.finalize(d)
 
 
-def test_up_past_root_names_chain():
+def test_parent_past_root_names_chain():
     class Leaf(C.Config):
-        value: int = C.interp(lambda c: c.up(2).x)
+        value: int = C.interp(lambda c: c.parent(2).x)
 
     class Root(C.Config):
         leaf: Leaf

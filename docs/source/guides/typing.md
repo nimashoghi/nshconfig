@@ -10,7 +10,7 @@ must keep firing.
   `(Callable[[Ctx], T]) -> T`, so `dim: int = C.interp(lambda c: "oops")` and
   `cfg.ln.dim = C.interp(lambda c: "oops")` are edit-time errors.
 - **Typed selector field access.** `c.root(TrainConfig).model`,
-  `c.parent(ModelConfig).dim`, `c.up(2, TrainConfig).batch`, and
+  `c.parent(ModelConfig).dim`, `c.parent(2, TrainConfig).batch`, and
   `c.self(LNConfig).dim` expose the selected config type to basedpyright, so misspelled
   fields and incompatible return types are edit-time errors.
 - **Draft writes and reads.** Drafts are typed as the real class and the draft machinery is
@@ -20,7 +20,7 @@ must keep firing.
 
 ## What it cannot check (loud at runtime instead)
 
-- **Untyped selector bodies.** `c.root()`, `c.parent()`, `c.up(...)`, and `c.self()` return
+- **Untyped selector bodies.** `c.root()`, `c.parent()`, `c.parent(n)`, and `c.self()` return
   dynamic views. This is the same accepted trade as pydantic's data-aware
   `default_factory`. The runtime backstop is pydantic itself: every resolved value is
   validated against the field's annotation and constraints.

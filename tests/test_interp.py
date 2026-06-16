@@ -293,10 +293,10 @@ def test_ctx_typed_and_untyped_selectors():
     assert C.finalize(UntypedRoot.config_draft()).leaf.from_root == 17
 
 
-def test_ctx_up_exact_hops_and_parent_field_names():
+def test_ctx_parent_exact_hops_and_parent_field_names():
     class Leaf(C.Config):
-        grandparent_dim: int = C.interp(lambda c: c.up(2).dim)
-        grandparent_dim_typed: int = C.interp(lambda c: c.up(2, PlainModel).dim)
+        grandparent_dim: int = C.interp(lambda c: c.parent(2).dim)
+        grandparent_dim_typed: int = C.interp(lambda c: c.parent(2, PlainModel).dim)
 
     class HasParentField(C.Config):
         parent: int = 31

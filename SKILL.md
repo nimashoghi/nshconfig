@@ -64,7 +64,7 @@ The lambda receives a `Ctx`:
 
 - `c.self()` / `c.self(Cls)` -- own level (earlier-declared fields already resolved)
 - `c.parent()` / `c.parent(Cls)` -- one level up (Hydra `${..x}`), always resolved
-- `c.up(n)` / `c.up(n, Cls)` -- exactly `n` ancestor hops up
+- `c.parent(n)` / `c.parent(n, Cls)` -- exactly `n` ancestor hops up
 - `c.root()` / `c.root(Cls)` -- the validation root (Hydra `${a.b}`), raw input + class defaults, incl. siblings
 - `c.nearest(Cls)` -- nearest enclosing `Cls` instance; ancestors only; survives refactors
 

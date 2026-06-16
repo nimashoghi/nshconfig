@@ -151,24 +151,28 @@ class Ctx:
     def parent(self) -> Any: ...
 
     @overload
-    def parent(self, cls: type[M]) -> M: ...
-
-    def parent(self, cls: type[M] | None = None) -> Any:
-        """One level up; pass a class for typed field access."""
-        if len(self._stack) < 2:
-            raise AttributeError("no parent: this model is the validation root")
-        return self._view_at(len(self._stack) - 2, cls)
+    def parent(self, levels_or_cls: type[M]) -> M: ...
 
     @overload
-    def up(self, levels: int = 1) -> Any: ...
+    def parent(self, levels_or_cls: int) -> Any: ...
 
     @overload
-    def up(self, levels: int, cls: type[M]) -> M: ...
+    def parent(self, levels_or_cls: int, cls: type[M]) -> M: ...
 
-    def up(self, levels: int = 1, cls: type[M] | None = None) -> Any:
-        """The ancestor exactly ``levels`` hops up; pass a class for typed access."""
+    def parent(
+        self, levels_or_cls: int | type[M] = 1, cls: type[M] | None = None
+    ) -> Any:
+        """An ancestor frame; pass a class for typed field access."""
+        if isinstance(levels_or_cls, int):
+            levels = levels_or_cls
+            expected = cls
+        else:
+            if cls is not None:
+                raise AttributeError("parent(Cls) does not accept a second class")
+            levels = 1
+            expected = levels_or_cls
         if levels < 1:
-            raise AttributeError("up() levels must be >= 1")
+            raise AttributeError("parent() levels must be >= 1")
         index = len(self._stack) - 1 - levels
         if index < 0:
             if levels == 1:
@@ -177,7 +181,7 @@ class Ctx:
             raise AttributeError(
                 f"no ancestor {levels} levels up (ancestors here: {chain})"
             )
-        return self._view_at(index, cls)
+        return self._view_at(index, expected)
 
     @overload
     def root(self) -> Any: ...
