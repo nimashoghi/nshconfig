@@ -1,4 +1,4 @@
-"""The canonical scenario tree from V2_CORE.md, importable by test modules."""
+"""The canonical scenario tree, importable by test modules."""
 
 import nshconfig as C
 

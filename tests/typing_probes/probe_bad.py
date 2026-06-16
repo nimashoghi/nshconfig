@@ -20,6 +20,8 @@ bad_default: int = C.interp(lambda c: "oops")  # BAD: lambda return type vs anno
 
 cfg = ModelConfig.config_draft()
 cfg.ln.dim = C.interp(lambda c: "oops")  # BAD: lambda return type at assignment site
+cfg.ln.dim = C.interp(lambda c: c.self(LNConfig).missing)  # BAD: typed self field
+cfg.ln.dim = C.interp(lambda c: c.parent(ModelConfig).ln)  # BAD: typed selector return type
 cfg.ln.dmi = 3  # BAD: unknown attribute on a draft
 cfg.dim = "1024"  # BAD: wrong value type at assignment site
 bad_ret: str = cfg.config_finalize()  # BAD: finalize returns the config type, not str

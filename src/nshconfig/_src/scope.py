@@ -2,7 +2,7 @@
 
 Defined at module level (not in the class body) so cloudpickle of notebook-defined
 ``Config`` subclasses serializes it BY REFERENCE; a class-body def would be pickled
-by value and drag in the unpicklable ``ContextVar``. See V2_CORE.md sections 4 and 8.
+by value and drag in the unpicklable ``ContextVar``.
 """
 
 from contextvars import ContextVar
@@ -63,7 +63,7 @@ def interpolation_scope(cls: type[BaseModel], value: Any, handler: Any) -> Any:
     Per field, in declaration order: ``v = value.get(name, field.default)``; if ``v``
     is a marker, resolve it against the ancestor stack. An instance marker is found AT
     the key; a class-level marker is the same kind of object found in the default slot
-    when the key is absent. There is no second mechanism (V2_CORE.md section 4).
+    when the key is absent. There is no second mechanism.
     """
     if not isinstance(value, dict):
         return handler(value)

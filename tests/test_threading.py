@@ -17,7 +17,7 @@ def test_concurrent_drafts_are_isolated():
             barrier.wait()
             cfg = TrainConfig.config_draft()
             cfg.model.dim = 100 + i
-            cfg.model.encoder.ln.dim = C.interp(lambda c, i=i: c.root.model.dim + i)
+            cfg.model.encoder.ln.dim = C.interp(lambda c, i=i: c.root().model.dim + i)
             for _ in range(50):  # interleave writes across threads
                 cfg.batch = i
             f = C.finalize(cfg)

@@ -80,10 +80,14 @@ mid-composition and finalize on the far side, provenance included.
 
 | Accessor | Hydra equivalent | Sees |
 |---|---|---|
-| `c.data` | same level | own fields, earlier markers already resolved |
-| `c.parent` | `${..x}` | one level up, resolved |
-| `c.root` | `${a.b}` | the validation root, incl. sibling subtrees |
+| `c.self()` / `c.self(Cls)` | same level | own fields, earlier markers already resolved |
+| `c.parent()` / `c.parent(Cls)` | `${..x}` | one level up, resolved |
+| `c.up(n)` / `c.up(n, Cls)` | `${...x}` | exactly `n` ancestor hops up |
+| `c.root()` / `c.root(Cls)` | `${a.b}` | the validation root, incl. sibling subtrees |
 | `c.nearest(Cls)` | (none: better) | nearest enclosing `Cls`; survives restructuring |
+
+Passing a class gives typed field access and a runtime assertion. Omitting the class keeps the
+selector dynamic and performs no type assertion.
 
 ## License
 

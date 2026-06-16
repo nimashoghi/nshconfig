@@ -1,9 +1,9 @@
 """Golden basedpyright probes: the typing story is part of the contract.
 
-V2_CORE.md section 7: the lambda's return type is checked at both slots, draft
-writes are statically checked (the TYPE_CHECKING-gated dunders), and the ok-probe
-must stay completely clean. A pyright release that breaks either half of this is a
-canary firing, not a flake.
+The lambda's return type is checked at both slots, typed context selectors expose
+field names to basedpyright, draft writes are statically checked (the
+TYPE_CHECKING-gated dunders), and the ok-probe must stay completely clean. A
+pyright release that breaks any part of this is a canary firing, not a flake.
 
 The repo-root pyproject.toml excludes tests/typing_probes so project-wide scans
 (publish.sh, editors) skip probe_bad.py's deliberate errors -- and pyright honors

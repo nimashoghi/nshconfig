@@ -1,4 +1,4 @@
-"""Transport: pickles are how work-in-progress travels (V2_CORE.md section 8).
+"""Transport: pickles are how work-in-progress travels.
 
 The flagship path: a PENDING draft whose classes live in a notebook (``__main__``,
 cloudpickled BY VALUE) ships to a process that has only the library, arrives as a
@@ -37,7 +37,7 @@ class TrainConfig(C.Config):
 def test_cloudpickle_roundtrip_pending_draft_stays_live():
     cfg = TrainConfig.config_draft()
     cfg.width = 100
-    cfg.model.dim = C.interp(lambda c: c.root.width * 2)
+    cfg.model.dim = C.interp(lambda c: c.root().width * 2)
     cfg2 = pickle.loads(cloudpickle.dumps(cfg))
     assert C.is_draft(cfg2)
     cfg2.width = 200  # the round-tripped draft stays live
@@ -48,7 +48,7 @@ def test_cloudpickle_roundtrip_pending_draft_stays_live():
 def test_plain_pickle_policy():
     # lambdas do not plain-pickle: loud, documented; cloudpickle is the channel.
     cfg = TrainConfig.config_draft()
-    cfg.model.dim = C.interp(lambda c: c.root.width)
+    cfg.model.dim = C.interp(lambda c: c.root().width)
     with pytest.raises(Exception):
         pickle.dumps(cfg)
     # named module-level resolvers plain-pickle fine:
@@ -65,7 +65,7 @@ def test_plain_pickle_policy():
 
 
 def _double_width(c: C.Ctx) -> int:
-    return c.root.width * 2
+    return c.root().width * 2
 
 
 _NOTEBOOK_SIDE = """

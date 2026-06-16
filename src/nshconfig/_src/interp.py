@@ -1,15 +1,15 @@
 """The interpolation value: ``interp()`` markers, and the ``Ctx`` they resolve against.
 
-An ``Interp`` marker is an ordinary VALUE (see V2_CORE.md section 3): nothing special
-happens at class definition. It is legal anywhere a value sits (a draft assignment, a
-``model_validate`` input dict, a class default, ``Field(default=...)``) and resolves
-through one rule inside the validation pass (see ``scope.py``).
+An ``Interp`` marker is an ordinary value: nothing special happens at class
+definition. It is legal anywhere a value sits (a draft assignment, a
+``model_validate`` input dict, a class default, ``Field(default=...)``) and
+resolves through one rule inside the validation pass (see ``scope.py``).
 """
 
 import difflib
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Any, Callable, TypeAlias, TypeVar, cast
+from typing import Any, Callable, TypeAlias, TypeVar, cast, overload
 
 from pydantic import BaseModel
 from typing_extensions import override
@@ -17,6 +17,7 @@ from typing_extensions import override
 __all__ = ["Ctx", "Interp", "interp"]
 
 T = TypeVar("T")
+M = TypeVar("M", bound=BaseModel)
 
 # stack entry: (model class, in-progress input dict, key label in parent or None)
 StackEntry: TypeAlias = "tuple[type[BaseModel], dict[str, Any], str | None]"
@@ -136,34 +137,76 @@ class Ctx:
     def __init__(self, stack: Stack):
         self._stack = stack
 
-    @property
-    def data(self) -> Any:
-        """This model's own level (earlier-declared markers already resolved)."""
-        cls, data, _ = self._stack[-1]
-        return _View(cls, data, _dotted_prefix(self._stack))
+    @overload
+    def self(self) -> Any: ...
 
-    @property
-    def parent(self) -> Any:
-        """One level up (Hydra's ``${..x}``); ancestor frames are always resolved."""
+    @overload
+    def self(self, cls: type[M]) -> M: ...
+
+    def self(self, cls: type[M] | None = None) -> Any:
+        """This model's own level; pass a class for typed field access."""
+        return self._view_at(len(self._stack) - 1, cls)
+
+    @overload
+    def parent(self) -> Any: ...
+
+    @overload
+    def parent(self, cls: type[M]) -> M: ...
+
+    def parent(self, cls: type[M] | None = None) -> Any:
+        """One level up; pass a class for typed field access."""
         if len(self._stack) < 2:
             raise AttributeError("no parent: this model is the validation root")
-        cls, data, _ = self._stack[-2]
-        return _View(cls, data, _dotted_prefix(self._stack[:-1]))
+        return self._view_at(len(self._stack) - 2, cls)
 
-    @property
-    def root(self) -> Any:
-        """The validation root (Hydra's ``${a.b}``); raw input plus class defaults."""
-        cls, data, _ = self._stack[0]
-        return _View(cls, data, "")
+    @overload
+    def up(self, levels: int = 1) -> Any: ...
 
-    def nearest(self, cls: type) -> Any:
+    @overload
+    def up(self, levels: int, cls: type[M]) -> M: ...
+
+    def up(self, levels: int = 1, cls: type[M] | None = None) -> Any:
+        """The ancestor exactly ``levels`` hops up; pass a class for typed access."""
+        if levels < 1:
+            raise AttributeError("up() levels must be >= 1")
+        index = len(self._stack) - 1 - levels
+        if index < 0:
+            if levels == 1:
+                raise AttributeError("no parent: this model is the validation root")
+            chain = " > ".join(c.__name__ for c, _, _ in self._stack)
+            raise AttributeError(
+                f"no ancestor {levels} levels up (ancestors here: {chain})"
+            )
+        return self._view_at(index, cls)
+
+    @overload
+    def root(self) -> Any: ...
+
+    @overload
+    def root(self, cls: type[M]) -> M: ...
+
+    def root(self, cls: type[M] | None = None) -> Any:
+        """The validation root; pass a class for typed field access."""
+        return self._view_at(0, cls)
+
+    def nearest(self, cls: type[M]) -> M:
         """The nearest enclosing instance of ``cls`` (ancestors only, nominal)."""
         for i in range(len(self._stack) - 2, -1, -1):
             c, d, _ = self._stack[i]
             if issubclass(c, cls):
-                return _View(c, d, _dotted_prefix(self._stack[: i + 1]))
+                return cast(M, _View(c, d, _dotted_prefix(self._stack[: i + 1])))
         chain = " > ".join(c.__name__ for c, _, _ in self._stack)
         raise AttributeError(f"no enclosing {cls.__name__} (ancestors here: {chain})")
+
+    def _view_at(self, index: int, cls: type[M] | None = None) -> Any:
+        actual, data, _ = self._stack[index]
+        if cls is not None and not issubclass(actual, cls):
+            chain = " > ".join(c.__name__ for c, _, _ in self._stack)
+            raise AttributeError(
+                f"expected {cls.__name__} at {actual.__name__} frame "
+                f"(ancestors here: {chain})"
+            )
+        return _View(actual, data, _dotted_prefix(self._stack[: index + 1]))
 
 
 def _dotted_prefix(stack: Stack) -> str:

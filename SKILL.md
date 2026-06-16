@@ -57,15 +57,19 @@ The SAME kind of value works at composition time (the Hydra move), per tree:
 
 ```python
 cfg.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)  # draft slot
-TrainConfig.model_validate({"optim": {"lr": C.interp(lambda c: c.root.steps / 100)}})
+TrainConfig.model_validate({"optim": {"lr": C.interp(lambda c: c.root().steps / 100)}})
 ```
 
 The lambda receives a `Ctx`:
 
-- `c.data` -- own level (earlier-declared fields already resolved)
-- `c.parent` -- one level up (Hydra `${..x}`), always resolved
-- `c.root` -- the validation root (Hydra `${a.b}`), raw input + class defaults, incl. siblings
+- `c.self()` / `c.self(Cls)` -- own level (earlier-declared fields already resolved)
+- `c.parent()` / `c.parent(Cls)` -- one level up (Hydra `${..x}`), always resolved
+- `c.up(n)` / `c.up(n, Cls)` -- exactly `n` ancestor hops up
+- `c.root()` / `c.root(Cls)` -- the validation root (Hydra `${a.b}`), raw input + class defaults, incl. siblings
 - `c.nearest(Cls)` -- nearest enclosing `Cls` instance; ancestors only; survives refactors
+
+Passing a class gives typed field access and asserts that the selected frame is that class (or a
+subclass). Omitting the class keeps the selector dynamic and performs no type assertion.
 
 Rules: explicit values always beat interpolation (the lambda never runs if the field was
 provided). The lambda body is arbitrary pure Python (conditionals, arithmetic, f-strings over

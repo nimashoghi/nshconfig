@@ -1,8 +1,8 @@
 # nshconfig v2
 
 Typed, provenance-aware configuration for ML runs (drafts + `interp()` interpolation +
-`finalize()` + `explain()`), on pydantic >= 2.13 and Python >= 3.10. Design record:
-`V2_CORE.md` (spec), `V2_DESIGN.md` (exploration history). Usage guide for agents: `SKILL.md`.
+`finalize()` + `explain()`), on pydantic >= 2.13 and Python >= 3.10. Usage guide for
+agents: `SKILL.md`.
 
 ## Commands
 

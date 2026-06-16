@@ -9,7 +9,7 @@ class LNConfig(C.Config):
     dim: int = C.interp(lambda c: c.nearest(ModelConfig).dim)   # class default slot
 
 cfg.model.encoder.ln.dim = C.interp(lambda c: ...)              # draft assignment
-TrainConfig.model_validate({"model": {"dim": C.interp(lambda c: c.root.width)}})  # dict input
+TrainConfig.model_validate({"model": {"dim": C.interp(lambda c: c.root().width)}})  # dict input
 a: int = pydantic.Field(default=C.interp(lambda c: ...), gt=0)  # inside Field metadata
 ```
 
@@ -23,16 +23,22 @@ default slot when the key is absent.
 
 | Accessor | Hydra equivalent | Sees |
 |---|---|---|
-| `c.data` | same level | own fields; earlier-declared markers already resolved |
-| `c.parent` | `${..x}` | one level up; ancestor frames are always resolved |
-| `c.root` | `${a.b}` | the validation root; raw input + class defaults, incl. sibling subtrees |
+| `c.self()` / `c.self(Cls)` | same level | own fields; earlier-declared markers already resolved |
+| `c.parent()` / `c.parent(Cls)` | `${..x}` | one level up; ancestor frames are always resolved |
+| `c.up(n)` / `c.up(n, Cls)` | `${...x}` | exactly `n` ancestor hops up |
+| `c.root()` / `c.root(Cls)` | `${a.b}` | the validation root; raw input + class defaults, incl. sibling subtrees |
 | `c.nearest(Cls)` | (no equivalent) | nearest enclosing `Cls` instance, ancestors only |
 
-Prefer `c.nearest(SomeConfig)` over positional forms: it anchors on *meaning*, so it survives
-restructuring (nest a subtree one level deeper and nothing breaks) and disambiguates repeated
-classes (in a teacher/student tree, each LN binds to *its* model). Views support attribute
-access only; everything they return is plain Python, so the lambda body is ordinary pure
-Python: arithmetic, conditionals, `min`/`max`, f-strings over resolved values.
+Passing a class gives typed field access and asserts at runtime that the selected frame is that
+class or a subclass. Omitting the class keeps the selector dynamic and performs no type
+assertion.
+
+Prefer `c.nearest(SomeConfig)` over positional forms when the dependency is semantic rather
+than structural: it survives restructuring (nest a subtree one level deeper and nothing
+breaks) and disambiguates repeated classes (in a teacher/student tree, each LN binds to *its*
+model). Views support attribute access only; everything they return is plain Python, so the
+lambda body is ordinary pure Python: arithmetic, conditionals, `min`/`max`, f-strings over
+resolved values.
 
 ## Precedence: one rule
 
@@ -53,15 +59,16 @@ feeds validation rather than bypassing it.
 
 ## Ordering and the one-pass rule
 
-Each scope resolves *before* descending, so ancestor reads (`c.parent`, `c.nearest`) always
+Each scope resolves *before* descending, so ancestor reads (`c.parent()`, `c.up(...)`,
+`c.nearest(...)`) always
 see resolved values, and same-level chains work in declaration order. Dotted descent from
-`c.root` sees raw input plus static class defaults: a sibling value that is *itself* still
+`c.root()` sees raw input plus static class defaults: a sibling value that is *itself* still
 pending fails loudly with both ends named, rather than resolving lazily. Point both fields at
 the shared source instead:
 
 ```python
-cfg.a.x = C.interp(lambda c: c.root.width)   # not: c.root.b.y where b.y is also pending
-cfg.b.y = C.interp(lambda c: c.root.width)
+cfg.a.x = C.interp(lambda c: c.root().width)   # not: c.root().b.y where b.y is also pending
+cfg.b.y = C.interp(lambda c: c.root().width)
 ```
 
 One pass, no lazy re-entry: a finalized value can never depend on evaluation order invisibly,

@@ -13,9 +13,19 @@ class ModelConfig(C.Config):
     head_dim: int = C.interp(lambda c: c.nearest(ModelConfig).dim)  # class default slot
 
 
+class TrainConfig(C.Config):
+    scale: int = 2
+    model: ModelConfig
+
+
 def helper(cfg: ModelConfig) -> None:
     cfg.dim = 1024  # draft writes typecheck against declared fields
     cfg.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)  # instance slot
+    cfg.ln.dim = C.interp(lambda c: c.self(LNConfig).dim)
+    cfg.ln.dim = C.interp(lambda c: c.parent(ModelConfig).dim)
+    cfg.ln.dim = C.interp(lambda c: c.up(1, ModelConfig).dim)
+    cfg.ln.dim = C.interp(lambda c: c.root(TrainConfig).scale)
+    cfg.ln.dim = C.interp(lambda c: c.root().dynamic.path)  # untyped selector stays dynamic
 
 
 cfg = ModelConfig.config_draft()

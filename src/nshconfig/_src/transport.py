@@ -1,4 +1,4 @@
-"""Pickle hardening for the notebook-to-cluster transport (V2_CORE.md section 8).
+"""Pickle hardening for the notebook-to-cluster transport.
 
 pydantic-core's ``SchemaValidator``/``SchemaSerializer`` ``__reduce__`` passes the
 LIVE, cross-class-shared core schema dict as a constructor argument. Notebook-defined

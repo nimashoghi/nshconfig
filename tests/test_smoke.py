@@ -1,4 +1,4 @@
-"""The V2_CORE.md section-1 scenario, end to end (the first acceptance script)."""
+"""The canonical scenario, end to end."""
 
 import pytest
 from pydantic import ValidationError
@@ -36,7 +36,7 @@ def test_dict_input_marker_no_drafts():
     f = TrainConfig.model_validate(
         {
             "model": {
-                "encoder": {"ln": {"dim": C.interp(lambda c: c.root.batch * 4)}},
+                "encoder": {"ln": {"dim": C.interp(lambda c: c.root().batch * 4)}},
                 "decoder": {"ln": {}},
                 "head": {},
             }
@@ -73,7 +73,7 @@ def test_draft_is_real_instance_with_loud_gates():
 
 
 def test_shared_marker_object_in_both_slots():
-    width = C.interp(lambda c: c.root.model.dim)
+    width = C.interp(lambda c: c.root().model.dim)
 
     class Probe(C.Config):
         a: int = width

@@ -141,12 +141,12 @@ def test_t5_precedence_ladder_and_del():
     assert C.finalize(d).model.encoder.ln.dim == 20  # concrete then marker
 
     d = PlainTrain.config_draft()
-    d.model.encoder.ln.eps = C.interp(lambda c: c.root.width / 100)
+    d.model.encoder.ln.eps = C.interp(lambda c: c.root().width / 100)
     del d.model.encoder.ln.eps
     assert C.finalize(d).model.encoder.ln.eps == 1e-5  # del marker -> static default
 
     d = PairReq.config_draft()
-    d.r.x = C.interp(lambda c: c.root.width)
+    d.r.x = C.interp(lambda c: c.root().width)
     del d.r.x
     with pytest.raises(ValidationError):  # del marker on required -> missing
         C.finalize(d)
@@ -158,29 +158,29 @@ def test_t5_precedence_ladder_and_del():
 
 def test_t6_marker_satisfies_required_field():
     d = PairReq.config_draft()
-    d.r.x = C.interp(lambda c: c.root.width)
+    d.r.x = C.interp(lambda c: c.root().width)
     assert C.finalize(d).r.x == 64
 
     d = PairReq.config_draft()
-    d.r = ReqX.config_draft(x=C.interp(lambda c: c.root.width))  # marker via draft(**kwargs)
+    d.r = ReqX.config_draft(x=C.interp(lambda c: c.root().width))  # marker via draft(**kwargs)
     assert C.finalize(d).r.x == 64
 
 
 def test_t7_ancestor_frames_resolved_root_descent_raw():
     d = TrainConfig.config_draft()
-    d.model.dim = C.interp(lambda c: c.root.width * 2)
+    d.model.dim = C.interp(lambda c: c.root().width * 2)
     f = C.finalize(d)
     assert f.model.dim == 1024
     assert f.model.encoder.ln.dim == 1024  # class marker chains off RESOLVED ancestor
 
     d = PlainTrain.config_draft()
-    d.model.dim = C.interp(lambda c: c.root.width * 2)
+    d.model.dim = C.interp(lambda c: c.root().width * 2)
     d.model.encoder.ln.dim = C.interp(lambda c: c.nearest(PlainModel).dim)
     assert C.finalize(d).model.encoder.ln.dim == 1024  # chain via nearest() frame
 
     d = PlainTrain.config_draft()
-    d.model.dim = C.interp(lambda c: c.root.width * 2)
-    d.model.encoder.ln.dim = C.interp(lambda c: c.root.model.dim)  # raw frame!
+    d.model.dim = C.interp(lambda c: c.root().width * 2)
+    d.model.encoder.ln.dim = C.interp(lambda c: c.root().model.dim)  # raw frame!
     with pytest.raises(ValidationError, match="pending interpolation"):
         C.finalize(d)  # root dotted descent sees raw input: documented one-pass limit
 
@@ -188,33 +188,33 @@ def test_t7_ancestor_frames_resolved_root_descent_raw():
 def test_t8_sibling_reads_via_root():
     d = Pair.config_draft()
     d.b.y = 7
-    d.a.x = C.interp(lambda c: c.root.b.y)  # a validates BEFORE b
+    d.a.x = C.interp(lambda c: c.root().b.y)  # a validates BEFORE b
     assert C.finalize(d).a.x == 7
 
     d = Pair.config_draft()
     d.a.x = 3
-    d.b.y = C.interp(lambda c: c.root.a.x)  # b validates AFTER a
+    d.b.y = C.interp(lambda c: c.root().a.x)  # b validates AFTER a
     assert C.finalize(d).b.y == 3
 
     d = Pair.config_draft()
-    d.a.x = C.interp(lambda c: c.root.b.y)  # b untouched: static class default
+    d.a.x = C.interp(lambda c: c.root().b.y)  # b untouched: static class default
     assert C.finalize(d).a.x == 0
 
 
 def test_t10_same_level_declaration_order():
     d = Lvl.config_draft()
-    d.b = C.interp(lambda c: c.data.a * 2)
-    d.c2 = C.interp(lambda c: c.data.b + 1)  # reads the RESOLVED b (earlier in order)
+    d.b = C.interp(lambda c: c.self().a * 2)
+    d.c2 = C.interp(lambda c: c.self().b + 1)  # reads the RESOLVED b (earlier in order)
     f = C.finalize(d)
     assert (f.b, f.c2) == (20, 21)
 
     d = Lvl.config_draft()
-    d.a = C.interp(lambda c: c.data.b)  # later field, concrete
+    d.a = C.interp(lambda c: c.self().b)  # later field, concrete
     d.b = 5
     assert C.finalize(d).a == 5
 
     d = Lvl.config_draft()
-    d.a = C.interp(lambda c: c.data.b)  # later field untouched: static default
+    d.a = C.interp(lambda c: c.self().b)  # later field untouched: static default
     assert C.finalize(d).a == 2
 
 
@@ -228,20 +228,20 @@ def test_t11_below_reads_into_own_subtree():
         leaf: PlainLeaf
 
     d = PlainMid.config_draft()
-    d.x = C.interp(lambda c: c.data.leaf.z)
+    d.x = C.interp(lambda c: c.self().leaf.z)
     d.leaf.z = 9
     assert C.finalize(d).x == 9  # below-read of user-set value
 
     d = PlainMid.config_draft()
-    d.x = C.interp(lambda c: c.data.leaf.y)  # leaf untouched: static default
+    d.x = C.interp(lambda c: c.self().leaf.y)  # leaf untouched: static default
     assert C.finalize(d).x == 5
 
 
 def test_field_and_annotated_composition():
     class Tunable(C.Config):
         dim: int = 555
-        a: int = Field(default=C.interp(lambda c: c.parent.dim), gt=0)
-        b: Annotated[int, Field(multiple_of=5)] = C.interp(lambda c: c.parent.dim)
+        a: int = Field(default=C.interp(lambda c: c.parent().dim), gt=0)
+        b: Annotated[int, Field(multiple_of=5)] = C.interp(lambda c: c.parent().dim)
 
     class Host(C.Config):
         dim: int = 555
@@ -259,10 +259,71 @@ def test_field_and_annotated_composition():
         BadHost.model_validate({"t": {"b": 10}})  # interpolation feeds validation
 
 
+def test_ctx_typed_and_untyped_selectors():
+    class Leaf(C.Config):
+        own: int = 2
+        from_root_untyped: int = C.interp(lambda c: c.root().width)
+        from_root_typed: int = C.interp(lambda c: c.root(PlainTrain).width)
+        from_parent_typed: int = C.interp(lambda c: c.parent(PlainModel).dim)
+        from_self_typed: int = C.interp(lambda c: c.self(Leaf).own)
+
+    class Model(PlainModel):
+        dim: int = 9
+        leaf: Leaf
+
+    class RootTrain(PlainTrain):
+        model: Model
+
+    d = RootTrain.config_draft()
+    d.width = 23
+    d.model.dim = 11
+    f = C.finalize(d)
+    assert f.model.leaf.from_root_untyped == 23
+    assert f.model.leaf.from_root_typed == 23
+    assert f.model.leaf.from_parent_typed == 11
+    assert f.model.leaf.from_self_typed == 2
+
+    class UntypedLeaf(C.Config):
+        from_root: int = C.interp(lambda c: c.root().width)
+
+    class UntypedRoot(C.Config):
+        width: int = 17
+        leaf: UntypedLeaf
+
+    assert C.finalize(UntypedRoot.config_draft()).leaf.from_root == 17
+
+
+def test_ctx_up_exact_hops_and_parent_field_names():
+    class Leaf(C.Config):
+        grandparent_dim: int = C.interp(lambda c: c.up(2).dim)
+        grandparent_dim_typed: int = C.interp(lambda c: c.up(2, PlainModel).dim)
+
+    class HasParentField(C.Config):
+        parent: int = 31
+        child_value: int = C.interp(lambda c: c.self().parent)
+
+    class Mid(C.Config):
+        leaf: Leaf
+        named: HasParentField
+
+    class Model(PlainModel):
+        mid: Mid
+
+    class Root(C.Config):
+        model: Model
+
+    d = Root.config_draft()
+    d.model.dim = 41
+    f = C.finalize(d)
+    assert f.model.mid.leaf.grandparent_dim == 41
+    assert f.model.mid.leaf.grandparent_dim_typed == 41
+    assert f.model.mid.named.child_value == 31
+
+
 def test_direct_construction_semantics():
     class SelfSufficient(C.Config):
         dim: int = 64
-        run_name: str = C.interp(lambda c: f"run-d{c.data.dim}")
+        run_name: str = C.interp(lambda c: f"run-d{c.self().dim}")
 
     # a marker reading only its own level resolves even standalone:
     assert SelfSufficient(dim=128).run_name == "run-d128"

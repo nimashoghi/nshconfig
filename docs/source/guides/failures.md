@@ -7,9 +7,10 @@ raises.
 
 | Failure | When | The message carries |
 |---|---|---|
-| Orphan: `c.nearest(Cls)` finds no enclosing `Cls`; `c.parent` at a root | finalize / any validation | `cannot interpolate ln.dim [LNConfig.dim = interp(<fn @ file:line>)]: no enclosing ModelConfig (ancestors here: EncoderConfig > LNConfig)` |
+| Orphan: `c.nearest(Cls)` finds no enclosing `Cls`; `c.parent()` at a root; `c.up(n)` climbs past the root | finalize / any validation | `cannot interpolate ln.dim [LNConfig.dim = interp(<fn @ file:line>)]: no enclosing ModelConfig (ancestors here: EncoderConfig > LNConfig)` |
+| Typed selector mismatch, e.g. `c.root(TrainConfig)` on a different root | finalize / any validation | the expected class, actual frame class, and ancestor chain |
 | Cycle: mutual markers across subtrees; self-reference | finalize | one `ValidationError` with *both ends* as entries, each naming the other's pending marker |
-| Reading a still-pending sibling via `c.root` | finalize | "is itself pending interpolation (...) (possible cycle; set a concrete value, or point both at the same concrete source)" |
+| Reading a still-pending sibling via `c.root()` | finalize | "is itself pending interpolation (...) (possible cycle; set a concrete value, or point both at the same concrete source)" |
 | Marker outside a declared field slot (e.g. inside a list under `Any`) | root sweep after validation | the exact path: `leaked into the final at Meta.meta[0]` |
 | Reading a pending/unset field on a draft | compose time | `UnsetError` with the path; "read it after finalize()" for interpolated fields |
 | Using a pending marker as data (`bool`, f-string, arithmetic) | compose time | `DraftError`/`TypeError` naming the marker and site |
