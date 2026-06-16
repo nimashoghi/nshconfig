@@ -17,6 +17,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from ._src.config import Config as Config
 from ._src.config import is_draft as is_draft
+from ._src.config import set_model_config_defaults as set_model_config_defaults
 from ._src.errors import DraftError as DraftError
 from ._src.errors import UnsetError as UnsetError
 from ._src.finalize import finalize as finalize
@@ -48,6 +49,7 @@ __all__ = [
     "interp",
     "is_draft",
     "provenance",
+    "set_model_config_defaults",
     "source",
     "thaw",
     "__version__",

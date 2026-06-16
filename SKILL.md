@@ -25,8 +25,10 @@ class TrainConfig(C.Config):
 ```
 
 `C.Config` is a pydantic BaseModel with `extra="forbid"`, `frozen=True` (finals are immutable
-and hashable), `validate_default=True`. Leave nested config fields bare (`optim: OptimConfig`,
-no default): drafts auto-create them, and finalize fills untouched required subtrees.
+and hashable), `strict=True`, `use_attribute_docstrings=True`, and `validate_default=True`.
+Leave nested config fields bare (`optim: OptimConfig`, no default): drafts auto-create them,
+and finalize fills untouched required subtrees. Set process-wide defaults before defining
+config classes with `C.set_model_config_defaults(arbitrary_types_allowed=True)`.
 
 ## Drafts and finalize
 

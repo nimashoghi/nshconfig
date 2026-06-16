@@ -43,7 +43,16 @@ def large(cfg: TrainConfig) -> None:
 ```
 
 `C.Config` is a pydantic `BaseModel` with `extra="forbid"`, `frozen=True` (finals are
-immutable and hashable), and `validate_default=True`.
+immutable and hashable), `strict=True`, `use_attribute_docstrings=True`, and
+`validate_default=True`.
+
+To set project-wide defaults before defining or importing config classes, call:
+
+```python
+import nshconfig as C
+
+C.set_model_config_defaults(arbitrary_types_allowed=True)
+```
 
 ## Compose, finalize, run
 

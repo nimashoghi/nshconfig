@@ -8,12 +8,13 @@ The dunders are hidden from the type checker so basedpyright keeps pydantic's
 declared attribute semantics on drafts: typo'd draft writes are STATIC errors.
 """
 
+from collections.abc import Mapping
 import difflib
 from types import MethodType
 from typing import TYPE_CHECKING, Any, Callable, cast
 
 from pydantic import BaseModel, ConfigDict, model_validator
-from typing_extensions import Self, override
+from typing_extensions import Self, Unpack, override
 
 from . import transport as transport  # registers the pickle shim on import
 from .errors import DraftError, UnsetError
@@ -24,10 +25,86 @@ from .scope import interpolation_scope
 if TYPE_CHECKING:
     from .provenance import Event, Explanation
 
-__all__ = ["Config", "is_draft"]
+__all__ = ["Config", "is_draft", "set_model_config_defaults"]
 
 DRAFT_KEY = "__nshconfig_draft__"
 _UNSET = object()
+_CONFIG_DICT_KEYS = frozenset(ConfigDict.__annotations__)
+_BUILTIN_MODEL_CONFIG = ConfigDict(
+    extra="forbid",
+    frozen=True,
+    strict=True,
+    use_attribute_docstrings=True,
+    validate_default=True,
+)
+_MODEL_CONFIG_DEFAULTS = _BUILTIN_MODEL_CONFIG
+
+
+def _builtin_model_config_with(overrides: ConfigDict) -> ConfigDict:
+    return cast("ConfigDict", {**_BUILTIN_MODEL_CONFIG, **overrides})
+
+
+def _active_model_config_with(overrides: ConfigDict) -> ConfigDict:
+    return cast("ConfigDict", {**_MODEL_CONFIG_DEFAULTS, **overrides})
+
+
+def set_model_config_defaults(**overrides: Unpack[ConfigDict]) -> None:
+    """Set default pydantic config for future ``Config`` subclasses.
+
+    Call this before defining or importing project config classes. Existing
+    classes keep the pydantic validators they were built with.
+    """
+    global _MODEL_CONFIG_DEFAULTS
+    _MODEL_CONFIG_DEFAULTS = _builtin_model_config_with(overrides)
+    Config.model_config = _MODEL_CONFIG_DEFAULTS
+
+
+def _explicit_config_from(value: object) -> ConfigDict:
+    if not isinstance(value, Mapping):
+        raise TypeError("model_config must be a mapping")
+    return cast("ConfigDict", dict(value))
+
+
+# Pydantic compiles validators during class creation. Injecting the active
+# defaults here makes global changes apply to future direct and indirect
+# subclasses while preserving explicit class-level overrides.
+class _ConfigMeta(type(BaseModel)):
+    def __new__(
+        mcls,
+        name: str,
+        bases: tuple[type, ...],
+        namespace: dict[str, Any],
+        **kwargs: Any,
+    ) -> type:
+        config_cls = globals().get("Config")
+        if isinstance(config_cls, type) and any(issubclass(base, config_cls) for base in bases):
+            inherited_explicit = ConfigDict()
+            for base in bases:
+                inherited_explicit.update(
+                    getattr(base, "__nshconfig_explicit_model_config__", {})
+                )
+
+            raw_class_config = namespace.get("model_config", _UNSET)
+            class_config = (
+                ConfigDict()
+                if raw_class_config is _UNSET
+                else _explicit_config_from(raw_class_config)
+            )
+            class_kwargs = cast(
+                "ConfigDict", {k: v for k, v in kwargs.items() if k in _CONFIG_DICT_KEYS}
+            )
+
+            namespace = dict(namespace)
+            namespace["model_config"] = _active_model_config_with(
+                cast("ConfigDict", {**inherited_explicit, **class_config})
+            )
+            cls = super().__new__(mcls, name, bases, namespace, **kwargs)
+            cls.__nshconfig_explicit_model_config__ = cast(
+                "ConfigDict", {**inherited_explicit, **class_config, **class_kwargs}
+            )
+            return cls
+
+        return super().__new__(mcls, name, bases, namespace, **kwargs)
 
 
 def is_draft(obj: Any) -> bool:
@@ -77,8 +154,8 @@ _VERBS: dict[str, tuple[Callable[..., Any], bool]] = {  # name -> (impl, is_prop
 }
 
 
-class Config(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, validate_default=True)
+class Config(BaseModel, metaclass=_ConfigMeta):
+    model_config = _MODEL_CONFIG_DEFAULTS
 
     # The one resolution site. Module-level function (see scope.py) attached here so
     # cloudpickle of notebook-defined subclasses serializes it by reference.
