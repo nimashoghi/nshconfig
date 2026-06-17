@@ -1,5 +1,7 @@
 """Golden typing probe: every line here must typecheck cleanly under basedpyright."""
 
+from typing import Annotated
+
 import nshconfig as C
 
 
@@ -16,6 +18,19 @@ class ModelConfig(C.Config):
 class TrainConfig(C.Config):
     scale: int = 2
     model: ModelConfig
+
+
+class ReexportConfig(C.Config):
+    model_config = C.ConfigDict(str_strip_whitespace=True)
+
+    x: Annotated[int, C.Field(gt=0)]
+    y: C.PositiveInt = 1
+
+    @C.field_validator("x")
+    @classmethod
+    def validate_x(cls, value: int, info: C.ValidationInfo) -> int:
+        assert info.field_name == "x"
+        return value
 
 
 def helper(cfg: ModelConfig) -> None:
@@ -42,3 +57,7 @@ thawed: ModelConfig = final2.config_thaw()
 exp2: C.Explanation = final2.config_explain("ln.dim")
 table: dict[str, list[C.Event]] = final2.config_provenance()
 flag: bool = cfg.config_is_draft
+adapter: C.TypeAdapter[int] = C.TypeAdapter(int)
+adapted: int = adapter.validate_python(1)
+reexported = ReexportConfig(x=2)
+positive: int = reexported.y

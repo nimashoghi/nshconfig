@@ -10,7 +10,7 @@ class LNConfig(C.Config):
 
 cfg.model.encoder.ln.dim = C.interp(lambda c: ...)              # draft assignment
 TrainConfig.model_validate({"model": {"dim": C.interp(lambda c: c.root().width)}})  # dict input
-a: int = pydantic.Field(default=C.interp(lambda c: ...), gt=0)  # inside Field metadata
+a: int = C.Field(default=C.interp(lambda c: ...), gt=0)         # inside Field metadata
 ```
 
 Nothing special happens at class definition: pydantic stores the marker verbatim in the

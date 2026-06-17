@@ -9,13 +9,13 @@ v2 is a greenfield rewrite; there is no compatibility layer. v1 remains availabl
 | `AllowMissing[T] = MISSING` as "user must provide before finalize" | a required field, simply unset on the draft; `finalize` fails per-leaf with provenance |
 | `validate_no_missing()` | nothing: there is no sentinel to sweep for |
 | `cfg = Cls.draft(); ...; cfg.finalize()` | `cfg = Cls.config_draft(); ...; cfg.config_finalize()` — but children auto-create now (no more pre-assigning child drafts), and finals are frozen |
-| `Registry` / dynamic discriminated unions | plain pydantic: `Annotated[A \| B, Field(discriminator="kind")]`; for dump-side polymorphism on base-annotated fields see pydantic 2.13's `polymorphic_serialization` |
+| `Registry` / dynamic discriminated unions | plain pydantic: `Annotated[A \| B, C.Field(discriminator="kind")]`; for dump-side polymorphism on base-annotated fields see pydantic 2.13's `polymorphic_serialization` |
 | `nshconfig-export` codegen, TypedDicts, JSON schemas | removed; `Cls.model_json_schema()` covers editor schemas |
 | `to_yaml_*` / `to_toml_*` / `from_python_file` | removed; `model_dump_json`/`model_validate_json` are the record, configs are Python modules you import |
 | `Config` as `MutableMapping` (Lightning hparams) | removed; pass `final.model_dump()` at the call site |
 | `Singleton` / `singleton` | removed; a module-level variable is the singleton |
 | `deduplicate(configs)` | finals are hashable: `list(dict.fromkeys(configs))` |
-| `with_config`, pydantic wildcard re-exports | import from `pydantic` directly; nshconfig exports only its own names |
+| `with_config`, pydantic wildcard re-exports | v1 wildcard compatibility is gone; v2 exposes a broad explicit Pydantic v2 surface as `C.Field`, `C.field_validator`, `C.with_config`, etc. |
 
 ## What you gain
 

@@ -14,7 +14,7 @@ import nshconfig as C
 
 class LNConfig(C.Config):
     dim: int = 32                  # plain default
-    eps: float = 1e-5
+    eps: float = C.Field(default=1e-5, gt=0)
 
 
 class EncoderConfig(C.Config):
@@ -36,6 +36,13 @@ class TrainConfig(C.Config):
     batch: int = 8
     model: ModelConfig
 
+    @C.field_validator("batch")
+    @classmethod
+    def positive_batch(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("batch must be positive")
+        return value
+
 
 def large(cfg: TrainConfig) -> None:
     """A Hydra config group is just a function that mutates a draft."""
@@ -45,6 +52,9 @@ def large(cfg: TrainConfig) -> None:
 `C.Config` is a pydantic `BaseModel` with `extra="forbid"`, `frozen=True` (finals are
 immutable and hashable), `strict=True`, `use_attribute_docstrings=True`, and
 `validate_default=True`.
+nshconfig also re-exports the useful Pydantic v2 authoring surface (`C.Field`,
+`C.field_validator`, `C.model_validator`, `C.TypeAdapter`, constraints, URL types, etc.) so
+ordinary config modules can usually import only `nshconfig as C`.
 
 To set project-wide defaults before defining or importing config classes, call:
 

@@ -76,10 +76,11 @@ subclass). Omitting the class keeps the selector dynamic and performs no type as
 Rules: explicit values always beat interpolation (the lambda never runs if the field was
 provided). The lambda body is arbitrary pure Python (conditionals, arithmetic, f-strings over
 resolved values). Resolved values still pass field constraints (`Field(gt=0)` etc.).
-`interp()` composes with `Field`: `a: int = C.Field(default=C.interp(...), gt=0)` -- use
-pydantic's Field directly. One pass: a marker reading a still-pending SIBLING value fails
-loudly (point both at the shared source instead). Markers refuse `bool()`/f-strings while
-pending; `==` on markers is identity.
+`interp()` composes with `Field`: `a: int = C.Field(default=C.interp(...), gt=0)`. nshconfig
+re-exports the useful Pydantic v2 config-authoring surface, so use `C.Field`,
+`C.field_validator`, `C.model_validator`, `C.TypeAdapter`, etc. in ordinary config modules.
+One pass: a marker reading a still-pending SIBLING value fails loudly (point both at the shared
+source instead). Markers refuse `bool()`/f-strings while pending; `==` on markers is identity.
 
 ## Provenance: why did this run use that value?
 
