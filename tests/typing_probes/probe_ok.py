@@ -1,63 +1,60 @@
-"""Golden typing probe: every line here must typecheck cleanly under basedpyright."""
+"""Golden typing probe: this file must remain clean under basedpyright."""
 
 from typing import Annotated
+
+from pydantic import ConfigDict, Field, ValidationInfo, field_validator
+from typing_extensions import assert_type
 
 import nshconfig as C
 
 
-class LNConfig(C.Config):
+class LayerNorm(C.Config):
     dim: int = 32
 
 
-class ModelConfig(C.Config):
+class Model(C.Config):
     dim: int = 768
-    ln: LNConfig
-    head_dim: int = C.interp(lambda c: c.nearest(ModelConfig).dim)  # class default slot
+    norm: LayerNorm
+    head_dim: int = C.interp(lambda context: context.current(Model).dim)
 
 
-class TrainConfig(C.Config):
+class Run(C.Config):
     scale: int = 2
-    model: ModelConfig
+    model: Model
 
 
-class ReexportConfig(C.Config):
-    model_config = C.ConfigDict(str_strip_whitespace=True)
+class ProjectConfig(C.Config):
+    model_config = ConfigDict(strict=False)
 
-    x: Annotated[int, C.Field(gt=0)]
-    y: C.PositiveInt = 1
+    count: Annotated[int, Field(gt=0)]
 
-    @C.field_validator("x")
+    @field_validator("count")
     @classmethod
-    def validate_x(cls, value: int, info: C.ValidationInfo) -> int:
-        assert info.field_name == "x"
+    def validate_count(cls, value: int, info: ValidationInfo) -> int:
+        assert info.field_name == "count"
         return value
 
 
-def helper(cfg: ModelConfig) -> None:
-    cfg.dim = 1024  # draft writes typecheck against declared fields
-    cfg.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)  # instance slot
-    cfg.ln.dim = C.interp(lambda c: c.self(LNConfig).dim)
-    cfg.ln.dim = C.interp(lambda c: c.parent(ModelConfig).dim)
-    cfg.ln.dim = C.interp(lambda c: c.parent(1, ModelConfig).dim)
-    cfg.ln.dim = C.interp(lambda c: c.root(TrainConfig).scale)
-    cfg.ln.dim = C.interp(lambda c: c.root().dynamic.path)  # untyped selector stays dynamic
+def compose(work: Model) -> None:
+    work.dim = 1024
+    work.norm.dim = C.interp(lambda context: context.current(LayerNorm).dim)
+    work.norm.dim = C.interp(lambda context: context.parent(Model).dim)
+    work.norm.dim = C.interp(lambda context: context.parent(1, Model).dim)
+    work.norm.dim = C.interp(lambda context: context.nearest(Model).dim)
+    work.norm.dim = C.interp(lambda context: context.root(Run).scale)
+    work.norm.dim = C.interp(lambda context: context.root().dynamic.path)
 
 
-cfg = ModelConfig.config_draft()
-helper(cfg)
-final = C.finalize(cfg)  # typed (C) -> C
-value: int = final.ln.dim
-explained: C.Explanation = C.explain(final, "ln.dim")
-with C.source("sweep:lr"):
-    cfg.dim = 2048
-
-# the config_* verb family is fully typed as methods
-final2: ModelConfig = cfg.config_finalize()
-thawed: ModelConfig = final2.config_thaw()
-exp2: C.Explanation = final2.config_explain("ln.dim")
-table: dict[str, list[C.Event]] = final2.config_provenance()
-flag: bool = cfg.config_is_draft
-adapter: C.TypeAdapter[int] = C.TypeAdapter(int)
-adapted: int = adapter.validate_python(1)
-reexported = ReexportConfig(x=2)
-positive: int = reexported.y
+work = C.draft(Model)
+assert_type(work, Model)
+compose(work)
+final = C.finalize(work)
+assert_type(final, Model)
+value: int = final.norm.dim
+explanation: C.Explanation = C.explain(final, "norm.dim")
+table: dict[str, tuple[C.Event, ...]] = C.provenance(final)
+draft_flag: bool = C.is_draft(work)
+with C.source("sweep:model-dim"):
+    work.dim = 2048
+relaxed = ProjectConfig(count=2)
+positive: int = relaxed.count

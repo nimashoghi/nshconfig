@@ -1,112 +1,114 @@
 # Quickstart
 
-The whole user-facing vocabulary is one verb family and one value:
-`config_draft` / `config_finalize` / `config_thaw` / `config_explain` / `config_provenance` /
-`config_is_draft`, plus `C.interp(lambda c: ...)`. Module-level functional aliases
-(`C.finalize(cfg)`, `C.explain(cfg, path)`, ...) exist for functional style.
+This example defines a schema, composes a draft, derives a value, validates the
+result, explains it, and saves a run record.
 
-## Define configs
+## Define the schema
+
+Use Pydantic directly for fields, constraints, aliases, and validators.
 
 ```python
-# myproj/configs.py
+# configs.py
+from pydantic import Field, field_validator
+
 import nshconfig as C
 
 
-class LNConfig(C.Config):
-    dim: int = 32                  # plain default
-    eps: float = C.Field(default=1e-5, gt=0)
+class Optimizer(C.Config):
+    learning_rate: float = Field(default=3e-4, gt=0)
+    weight_decay: float = Field(default=0.0, ge=0)
 
 
-class EncoderConfig(C.Config):
-    ln: LNConfig                   # leave nested config fields bare
+class LayerNorm(C.Config):
+    dim: int = C.interp(lambda context: context.parent(Model).dim)
+    eps: float = Field(default=1e-5, gt=0)
 
 
-class HeadConfig(C.Config):
-    # class-level interpolation: a value sitting in the default slot
-    dim: int = C.interp(lambda c: c.nearest(ModelConfig).dim)
-
-
-class ModelConfig(C.Config):
+class Model(C.Config):
     dim: int = 768
-    encoder: EncoderConfig
-    head: HeadConfig
+    norm: LayerNorm
 
 
-class TrainConfig(C.Config):
-    batch: int = 8
-    model: ModelConfig
+class Run(C.Config):
+    optimizer: Optimizer
+    model: Model
+    epochs: int
 
-    @C.field_validator("batch")
+    @field_validator("epochs")
     @classmethod
-    def positive_batch(cls, value: int) -> int:
+    def positive_epochs(cls, value: int) -> int:
         if value <= 0:
-            raise ValueError("batch must be positive")
+            raise ValueError("epochs must be positive")
         return value
-
-
-def large(cfg: TrainConfig) -> None:
-    """A Hydra config group is just a function that mutates a draft."""
-    cfg.model.dim = 1024
 ```
 
-`C.Config` is a pydantic `BaseModel` with `extra="forbid"`, `frozen=True` (finals are
-immutable and hashable), `strict=True`, `use_attribute_docstrings=True`, and
-`validate_default=True`.
-nshconfig also re-exports the useful Pydantic v2 authoring surface (`C.Field`,
-`C.field_validator`, `C.model_validator`, `C.TypeAdapter`, constraints, URL types, etc.) so
-ordinary config modules can usually import only `nshconfig as C`.
+`LayerNorm.dim` is an interpolation rule stored as its class default. It runs only
+when no explicit value is supplied for that field.
 
-To set project-wide defaults before defining or importing config classes, call:
+## Compose and finalize
+
+A draft is a real `Run` instance, but it is intentionally mutable, incomplete,
+and unvalidated.
 
 ```python
 import nshconfig as C
 
-C.set_model_config_defaults(arbitrary_types_allowed=True)
+from configs import Run
+
+
+def large_model(work: Run) -> None:
+    work.model.dim = 1024
+
+
+work = C.draft(Run)
+large_model(work)
+
+with C.source("sweep:low-lr"):
+    work.optimizer.learning_rate = 1e-4
+
+work.epochs = 100
+run = C.finalize(work)
+
+assert run.model.dim == 1024
+assert run.model.norm.dim == 1024
 ```
 
-## Compose, finalize, run
+Required fields with one concrete `Config` annotation auto-create as child drafts,
+which is why `work.model.dim` and `work.optimizer.learning_rate` can be assigned on
+a fresh root. Required scalars still need an assignment.
+
+Finalization is non-destructive. The draft remains the composition recipe for a
+sweep:
 
 ```python
+work.model.dim = 512
+small = C.finalize(work)
+
+work.model.dim = 2048
+large = C.finalize(work)
+```
+
+## Explain and record
+
+```python
+import json
+from pathlib import Path
+
 import nshconfig as C
-from myproj.configs import TrainConfig, ModelConfig, large
 
-cfg = TrainConfig.config_draft()          # a REAL TrainConfig instance, mutable, unvalidated
-large(cfg)                         # helpers mutate drafts
-cfg.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)  # this tree only
-cfg.model.decoder = ...            # nested configs auto-create on access; no ceremony
 
-final = cfg.config_finalize()            # resolve interpolation -> validate ONCE -> frozen
-final.model_dump_json(indent=2)    # the run record: concrete values only
+print(C.explain(run, "model.norm.dim"))
+
+run_record = C.record(run)
+record_path = Path("run-config.json")
+record_path.write_text(run_record.to_json(indent=2), encoding="utf-8")
+
+wire_value = json.loads(record_path.read_text(encoding="utf-8"))
+restored = C.load_record(Run, wire_value)
+assert restored == run
+assert C.fingerprint(restored) == C.fingerprint(run)
 ```
 
-Explicit always beats interpolation: provide a value (constructor, dict, or draft write) and
-the lambda never runs. `del cfg.model.encoder.ln.dim` re-arms whatever sits below (a class
-rule, a static default, or a required-missing error at finalize).
-
-## Sweeps
-
-`finalize` is non-destructive and idempotent; the draft stays live:
-
-```python
-for lr in (1e-4, 3e-4, 1e-3):
-    cfg.optim.lr = lr
-    submit(train, cfg.config_finalize())
-```
-
-To tweak an existing final: `t = final.config_thaw()` gives a fresh draft seeded only from
-explicitly-set values, so interpolated values re-derive after your tweak.
-
-## Why did this run use that value?
-
-```python
-with C.source("sweep:lr"):
-    cfg.optim.lr = 1e-4
-
-print(cfg.config_finalize().config_explain("optim.lr"))
-# optim.lr = 0.0001
-#   set to 0.0001 at sweep.py:12 in <module>  [sweep:lr]   | cfg.optim.lr = 1e-4
-#   set to 0.0003 at configs/base.py:7 in base_config      | cfg.optim.lr = 3e-4
-#   class default: 0.001 (OptimConfig)
-```
-
-See the [provenance guide](guides/provenance.md).
+`load_record()` validates concrete stored values and restores provenance. It does
+not run interpolation or recover the original draft. See [run records](guides/records.md)
+and the [semantic contract](contract.md) for the precise distinction.

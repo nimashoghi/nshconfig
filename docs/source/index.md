@@ -1,45 +1,53 @@
 # nshconfig
 
-Typed, provenance-aware configuration for ML runs, powered by Pydantic.
-
-nshconfig v2 does three things, and tries to do them extremely well:
-
-1. **Draft building**: compose configs with plain Python assignment in notebooks and helper
-   functions, with validation deferred to one explicit boundary.
-2. **Interpolation**: `interp(lambda c: ...)` is a *value* that resolves against the config
-   tree at validation time. Hydra's `${..dim}` and `${model.dim}`, in Python, mostly
-   type-checked, and usable both in class bodies and at composition time.
-3. **Frozen, explainable finals**: the output of `finalize()` is an immutable, hashable,
-   fully-concrete pydantic model that dumps clean run records and can answer
-   *"why did this run use that value?"* down to file and line.
+`nshconfig` is a small lifecycle layer over Pydantic for Python-first ML
+configuration. Pydantic defines and validates the schema. `nshconfig` adds mutable
+incomplete drafts, Python interpolation, provenance, and verified run records.
 
 ```python
 import nshconfig as C
 
-class LNConfig(C.Config):
-    dim: int = C.interp(lambda c: c.nearest(ModelConfig).dim)
 
-class ModelConfig(C.Config):
-    dim: int = 768
-    ln: LNConfig
+class Optimizer(C.Config):
+    learning_rate: float = 3e-4
 
-cfg = ModelConfig.config_draft()
-cfg.dim = 1024
-final = cfg.config_finalize()
-assert final.ln.dim == 1024
-print(final.config_explain("ln.dim"))
+
+class Run(C.Config):
+    optimizer: Optimizer
+    epochs: int
+
+
+work = C.draft(Run)
+work.optimizer.learning_rate = 1e-4
+work.epochs = 100
+run = C.finalize(work)
 ```
+
+The four states are deliberately distinct:
+
+1. A `Config` class declares a Pydantic schema.
+2. A draft is mutable Python composition state and may be incomplete.
+3. A final is the validated result of one explicit interpolation boundary.
+4. A run record is inert JSON data describing the concrete final.
+
+There is no configuration language, registry, loader, or code-generation layer.
+The [semantic contract](contract.md) is the authority for lifecycle, ordering,
+value-graph, and reproducibility behavior. The [API reference](api.md) lists the
+complete exported surface and exact signatures.
 
 ```{toctree}
 :maxdepth: 2
 
 installation
 quickstart
+contract
+api
+changelog
 guides/drafts
 guides/interpolation
 guides/provenance
+guides/records
 guides/transport
 guides/failures
 guides/typing
-guides/migration
 ```

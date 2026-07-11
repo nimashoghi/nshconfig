@@ -1,50 +1,68 @@
-# Transport and run records
+# Transport, security, and environments
 
-The flagship flow: compose a draft in a notebook, ship it to a cluster, finalize there.
+Use cloudpickle when a live Python composition recipe must move from a notebook to
+another trusted process.
+
+The [semantic contract](../contract.md) defines the transport boundary and
+annotation rule.
+
+Install the transport extra in both environments:
+
+```bash
+pip install 'nshconfig[transport]'
+```
 
 ```python
 import cloudpickle
 
-# notebook side: classes may live in the notebook itself (__main__)
-cfg = TrainConfig.config_draft()
-cfg.model.dim = 2048
-cfg.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)  # still pending!
-payload = cloudpickle.dumps(cfg)
+import nshconfig as C
 
-# cluster side: only nshconfig + cloudpickle needed
-d = cloudpickle.loads(payload)
-assert C.is_draft(d)
-final = C.finalize(d)        # interpolation resolves on the far side
+
+work = C.draft(Run)
+work.model.dim = 2048
+work.model.norm.dim = C.interp(
+    lambda context: context.parent(Model).dim * 2
+)
+
+payload = cloudpickle.dumps(work)
+received = cloudpickle.loads(payload)
+assert C.is_draft(received)
+
+run = C.finalize(received)
 ```
 
-Pending drafts round-trip with their interpolations, provenance, and source sites intact, so a
-finalize error on the cluster cites the original notebook line.
+The draft keeps its interpolation callables and provenance. Notebook and local
+classes may be transported by value. Importable classes use normal pickle
+by-reference behavior; importing `nshconfig` does not install global reducers for
+Pydantic or pydantic-core objects.
 
-## Which pickle, when
+## Trust and compatibility
 
-| Object | plain `pickle` | `cloudpickle` |
+Pickles are executable. Load them only from a trusted source and use them as
+short-lived transport, never as the sole archive of a run.
+
+This applies to both standard pickle and cloudpickle. A digest or encrypted channel
+does not establish who created a payload; authenticate its origin and restrict who
+can write to the transport channel.
+
+Sender and receiver need the same Python version and compatible installed
+dependencies. This includes packages referenced by annotations, validators,
+serializers, and interpolation callables. Pin the environment used by both sides.
+
+For classes that need by-value transport, do not enable PEP 563 with
+`from __future__ import annotations`. Use normal eager annotations and quote a
+forward reference only where the referenced name is defined later. This matches
+notebook execution and keeps Pydantic's compiled schemas transportable on supported
+Python versions.
+
+## Transport is not a run record
+
+| Need | Use | Contains executable Python? |
 |---|---|---|
-| Finals | yes | yes |
-| Drafts without markers | yes | yes |
-| Drafts with `interp(lambda ...)` | no (lambdas) | yes |
-| Drafts with `interp(named_module_fn)` | yes | yes |
-| Notebook-defined config classes | no | yes (shipped by value) |
+| Move a live draft or notebook-defined class between trusted processes | cloudpickle | Yes |
+| Save what a completed run used | `C.record(final)` | No |
 
-cloudpickle is the supported notebook-to-cluster channel; pin compatible versions on both
-ends. nshconfig ships two pieces of transport hardening internally: the resolution validator
-is a module-level function (so by-value class pickles never capture interpreter-local state),
-and pydantic-core validator/serializer objects are wrapped in a lazy stand-in during pickling
-(rebuilding them mid-stream can otherwise fail on cyclic, partially-materialized schemas).
-
-## Run records: pickles are transport, JSON is the record
-
-```python
-(run_dir / "config.json").write_text(final.model_dump_json(indent=2))
-wandb.config.update(final.model_dump(mode="json"))
-```
-
-Finals contain concrete values only (nothing symbolic can survive `finalize`), so the record
-is dead data: reproducible by `TrainConfig.model_validate_json(...)` at the recorded git SHA,
-with no code re-execution. A config `.py` is a program, not a record; keep it in git and point
-at it from the run's provenance metadata. Never archive a pickle as the only copy of a run's
-config.
+A v4 run record contains canonical JSON values, provenance, a concrete config type,
+a schema fingerprint, an exact-runtime semantic fingerprint, and a value fingerprint
+that binds them together. It does not contain interpolation callables and cannot
+recover a draft. See [run records](records.md).

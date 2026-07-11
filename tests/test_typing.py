@@ -13,15 +13,17 @@ import resolution to this venv's interpreter with ``--pythonpath``.
 """
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 PROBES = Path(__file__).parent / "typing_probes"
 REPO = Path(__file__).parent.parent
 
 
-def _basedpyright(*files: Path) -> list[dict]:
+def _basedpyright(*files: Path) -> list[dict[str, Any]]:
     exe = Path(sys.executable).parent / "basedpyright"
     r = subprocess.run(
         [
@@ -37,11 +39,9 @@ def _basedpyright(*files: Path) -> list[dict]:
         text=True,
         cwd=REPO,
     )
-    return [
-        d
-        for d in json.loads(r.stdout)["generalDiagnostics"]
-        if d["severity"] == "error"
-    ]
+    assert r.stdout, r.stderr
+    diagnostics = json.loads(r.stdout)["generalDiagnostics"]
+    return [d for d in diagnostics if d["severity"] == "error"]
 
 
 def test_ok_probe_is_clean():
@@ -50,9 +50,16 @@ def test_ok_probe_is_clean():
 
 def test_bad_probe_seeded_errors_all_fire():
     bad = PROBES / "probe_bad.py"
-    expected_lines = {
-        i + 1 for i, line in enumerate(bad.read_text().splitlines()) if "# BAD:" in line
+    marker = re.compile(r"# BAD\[(?P<rule>[^]]+)]")
+    expected = {
+        (line_number, match.group("rule"))
+        for line_number, line in enumerate(bad.read_text().splitlines(), start=1)
+        if (match := marker.search(line))
     }
     diags = _basedpyright(bad)
-    flagged_lines = {d["range"]["start"]["line"] + 1 for d in diags}
-    assert flagged_lines == expected_lines, diags
+    actual = {
+        (diagnostic["range"]["start"]["line"] + 1, diagnostic.get("rule"))
+        for diagnostic in diags
+    }
+    assert actual == expected, diags
+    assert len(diags) == len(expected), diags

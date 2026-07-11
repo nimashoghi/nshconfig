@@ -1,27 +1,32 @@
-"""Golden typing probe: each seeded mistake below MUST be flagged by basedpyright.
-
-The expected (line, rule) pairs are asserted by tests/test_typing.py; keep the
-markers and this file's line numbers in sync via the BAD: comments.
-"""
+"""Golden typing probe: every BAD line must produce a basedpyright error."""
 
 import nshconfig as C
 
 
-class LNConfig(C.Config):
+class LayerNorm(C.Config):
     dim: int = 32
 
 
-class ModelConfig(C.Config):
+class Model(C.Config):
     dim: int = 768
-    ln: LNConfig
+    norm: LayerNorm
 
 
-bad_default: int = C.interp(lambda c: "oops")  # BAD: lambda return type vs annotation
+bad_default: int = C.interp(lambda context: "oops")  # BAD[reportAssignmentType]
 
-cfg = ModelConfig.config_draft()
-cfg.ln.dim = C.interp(lambda c: "oops")  # BAD: lambda return type at assignment site
-cfg.ln.dim = C.interp(lambda c: c.self(LNConfig).missing)  # BAD: typed self field
-cfg.ln.dim = C.interp(lambda c: c.parent(ModelConfig).ln)  # BAD: typed selector return type
-cfg.ln.dmi = 3  # BAD: unknown attribute on a draft
-cfg.dim = "1024"  # BAD: wrong value type at assignment site
-bad_ret: str = cfg.config_finalize()  # BAD: finalize returns the config type, not str
+work = C.draft(Model)
+work.norm.dim = C.interp(lambda context: "oops")  # BAD[reportAttributeAccessIssue]
+work.norm.dim = C.interp(
+    lambda context: context.current(
+        LayerNorm
+    ).missing  # BAD[reportAttributeAccessIssue]
+)
+work.norm.dim = C.interp(  # BAD[reportAttributeAccessIssue]
+    lambda context: context.parent(Model).norm
+)
+work.norm.dmi = 3  # BAD[reportAttributeAccessIssue]
+work.dim = "1024"  # BAD[reportAttributeAccessIssue]
+bad_result: str = C.finalize(work)  # BAD[reportAssignmentType]
+
+C.Field(default=1)  # BAD[reportAttributeAccessIssue]
+work.config_finalize()  # BAD[reportAttributeAccessIssue]

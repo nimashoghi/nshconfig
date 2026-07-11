@@ -1,16 +1,19 @@
-"""Error types and shared rendering helpers for the v2 core.
+"""Public exceptions raised by nshconfig's lifecycle boundaries."""
 
-Every failure names the dotted instance path where it happened, the owning
-``Cls.field``, and, when a marker is involved, the marker's source site captured
-at construction.
-"""
-
-__all__ = ["DraftError", "UnsetError"]
+__all__ = ["DraftError", "FingerprintError", "RecordError", "UnsetError"]
 
 
 class UnsetError(AttributeError):
-    """Reading a draft field that has no value yet (unset, or pending interpolation)."""
+    """A draft field was read before it had a concrete value."""
 
 
 class DraftError(TypeError):
-    """A draft was used where only a finalized config is meaningful."""
+    """A draft was used where a validated final is required."""
+
+
+class FingerprintError(ValueError):
+    """A final cannot be converted to deterministic fingerprint data."""
+
+
+class RecordError(ValueError):
+    """A run record is malformed or does not match its declared config."""

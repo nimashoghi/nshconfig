@@ -1,59 +1,83 @@
 # Provenance
 
-Every draft write is recorded with its frame: file, line, enclosing function, the assignment's
-source text, and an optional semantic label. Plain assignment is the API; the interpreter's
-frame is the source, and it cannot drift the way hand-written `source="..."` strings do.
+Draft assignment, deletion, tracked built-in container mutation, and interpolation
+create provenance events. Assignment itself is the API; source file, line, function,
+and source text are captured on a best-effort basis.
+
+The [semantic contract](../contract.md) defines event ordering, captured data, and
+the relationship between provenance and identity.
 
 ```python
-# configs/base.py
-def base_config(cfg: TrainConfig) -> None:
-    cfg.optim.lr = 3e-4
+work = C.draft(Run)
 
-# notebook / sweep script
-cfg = TrainConfig.config_draft()
-base_config(cfg)                  # the helper IS a provenance unit, automatically
-with C.source("sweep:lr"):        # optional label for a block of writes
-    cfg.optim.lr = 1e-4
-final = cfg.config_finalize()
+with C.source("sweep:learning-rate"):
+    work.optimizer.learning_rate = 1e-4
+
+run = C.finalize(work)
 ```
 
-## explain
+`C.source()` adds an optional semantic label to operations in its context. It does
+not replace the automatically captured location.
+
+## Explain one field
 
 ```python
-print(final.config_explain("optim.lr"))
-# optim.lr = 0.0001
-#   set to 0.0001 at sweep.py:12 in <module>  [sweep:lr]   | cfg.optim.lr = 1e-4
-#   set to 0.0003 at base.py:3 in base_config              | cfg.optim.lr = 3e-4
-#   class default: 0.001 (OptimConfig)
+explanation = C.explain(run, "optimizer.learning_rate")
+print(explanation)
 ```
 
-`explain(cfg, "a.b.c")` works on drafts mid-composition and on finals, returns a structured
-`Explanation` (a list of `Event` records with a pretty `__str__`), and renders newest-first.
-`del` shows as a tombstone in the chain. Interpolated values record the marker's source site
-*and what it read*, the "because" chain that bottoms out at human actions:
+`explain()` returns an immutable `Explanation` containing the current rendered
+value, the field's events, its default origin when known, and nested causes. For an
+interpolated field, the causes follow the canonical field paths that the callable
+read:
 
 ```python
-print(final.config_explain("model.head.dim"))
-# model.head.dim = 1024
-#   interpolated to 1024 by <lambda> @ configs.py:11 (class default)
-#       because model.dim = 1024
-#   class-default rule: interp(<<lambda> @ configs.py:11>)   (active)
+print(C.explain(run, "model.norm.dim"))
+# model.norm.dim = 1024
+#   interpolated to 1024 by <lambda> @ configs.py:... (class default)
+#       read model.dim = 1024
+#   because model.dim = 1024
 ```
 
-The rule line reports `(active)` when the class-default interpolation governs the value and
-`(shadowed)` when an explicit write does.
+Paths always use declared field names, not validation aliases.
 
-## The full table
+## Inspect the full table
 
-`cfg.config_provenance()` returns `{dotted_path: [Event, ...]}` for the whole tree; useful for
-logging the complete "who set what" story into a run record next to `config.json`.
+```python
+events_by_path = C.provenance(run)
+for event in events_by_path["optimizer.learning_rate"]:
+    print(event.kind, event.label, event.file, event.line)
+```
 
-## Properties
+`provenance()` works on drafts and finals. It returns a detached dictionary whose
+values are tuples of immutable `Event` objects. Mutating the dictionary cannot
+change the config's history.
 
-- Values in events are truncated reprs, never live objects (a recorded tensor will not be
-  kept alive by its provenance).
-- Provenance is plain data: it survives pickling, so cluster-side failures and `explain`
-  calls cite your notebook lines.
-- Histories do not affect identity: two value-identical finals with different provenance
-  compare equal and hash equal.
-- Overhead is one `sys._getframe` per draft write, roughly a microsecond.
+Events contain bounded, exception-safe renderings rather than live values. A
+failing `repr()` is recorded as unavailable and never makes a successful write
+fail. Exact built-in containers use deterministic rendering. These strings are
+presentation data, not integrity evidence. Provenance survives pickle transport and
+is included in run records.
+
+Provenance is explanatory metadata, not identity. It does not affect final equality
+or `C.fingerprint()`. Observation is also inert: ordinary field reads,
+`C.explain()`, and `C.provenance()` do not add events or change whether a final may
+be reused as a branch.
+
+When a final branch is reused, assignment and other non-interpolation provenance is
+preserved and rebased to its new path. A final with any interpolation event is
+rejected instead: because finals are only shallowly frozen, the library cannot
+prove that the old interpolation result remains fresh.
+
+A run record requires every provenance path and interpolation read to stay under
+the recorded `Config` root. If a nested branch's history reads a field from its
+parent, `C.record(branch)` rejects it as non-self-contained. Record the containing
+root instead.
+
+For a run record, every interpolation event carries SHA-256 tokens generated by a
+versioned structural encoding of its result and each dependency. Loading verifies
+the tokens against restored values and regenerates the bounded display strings.
+Recording rejects an opaque dependency or result for which no stable structural
+token exists. It also rejects a field whose interpolation event is followed by a
+later event, because that dependency claim no longer explains the field's current
+value. Interpolation must be the final event for a recordable interpolated field.

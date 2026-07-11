@@ -1,44 +1,80 @@
 # nshconfig v2
 
-Typed, provenance-aware configuration for ML runs (drafts + `interp()` interpolation +
-`finalize()` + `explain()`), on pydantic >= 2.13 and Python >= 3.10. Usage guide for
-agents: `SKILL.md`.
+`nshconfig` is a small lifecycle layer over Pydantic for typed ML-run
+configuration. It supports Python 3.10 through 3.14 and Pydantic 2.13 through
+the latest Pydantic 2.x release.
 
-## Commands
+Read `DESIGN.md` before changing behavior. It is the semantic authority.
+`README.md` is the user introduction, and `SKILL.md` is the concise usage guide
+for coding agents.
+
+## Development commands
 
 ```bash
-# Install all dependencies
-uv sync --all-groups
+# Reproduce the locked development environment, including optional features.
+uv sync --locked --all-groups --all-extras
 
-# Run tests
+# Tests and a focused test file.
 uv run pytest
-
-# Run a single test file
 uv run pytest tests/test_interp.py -v
 
-# Type checking (src must stay at 0 errors, 0 warnings)
+# Static checks. src must remain at 0 basedpyright errors and warnings.
 uv run basedpyright src
-
-# Linting
 uv run ruff check src tests
+uv run ruff format --check src tests
 
-# Multi-version testing (Python x pydantic floor/latest)
+# Python 3.10-3.14 against the Pydantic floor and latest 2.x.
 uv run nox -s tests
 
-# Docs
-uv run sphinx-build -b html docs/source docs/build/html
-
-# Build and publish
-./scripts/publish.sh
+# Documentation and distributions.
+uv run sphinx-build -W --keep-going -b html docs/source docs/build/html
+uv build --clear
 ```
 
-## Conventions
+Use `./scripts/publish.sh` only for an intentional release.
 
-- No `from __future__ import annotations` anywhere: PEP 563 is a legacy path (PEP 649 lazy
-  annotations are the 3.14 default), eager annotations match notebook-defined classes under
-  cloudpickle, and the 3.10 floor makes the syntax motivation moot. Quote forward references
-  explicitly when a name is defined later.
-- The golden typing probes in `tests/typing_probes/` are part of the contract: changes that
-  alter what basedpyright reports there are behavior changes, not flakes.
-- The transport tests spawn subprocesses (cloudpickle canaries); they are required, not slow
-  extras.
+## Architecture
+
+- Pydantic owns schemas, aliases, validation, serialization, and JSON Schema.
+  Import its authoring APIs directly from `pydantic`.
+- `nshconfig` adds four distinct states: a `Config` class, a mutable incomplete
+  draft, a validated field-frozen final, and an inert JSON run record.
+- Calling a `Config` class creates a final. Create composition state only with
+  `draft(ConfigType)` and cross the validation boundary with the non-destructive
+  `finalize()` function.
+- Interpolation is a whole-field Python callable. Field declaration order is
+  dependency order, and interpolation may read only canonical values whose
+  complete field validation has already finished.
+- Draft writes, deletion, built-in container mutation, and interpolation produce
+  provenance. `explain()` follows interpolation dependencies.
+- Finals are shallowly field-frozen and all `Config` instances are unhashable.
+  Use `fingerprint()` for deterministic content identity.
+- Run records contain concrete JSON-safe values and provenance. Loading one must
+  never execute interpolation. Cloudpickle is separate, trusted, short-lived
+  executable transport.
+- Structural `Config` positions must have concrete annotations. Drafts and
+  interpolation markers may not be hidden under `Any`, `object`, or opaque
+  values.
+- The public API is the narrow function-based surface in
+  `src/nshconfig/__init__.py`. There are no Pydantic re-exports, duplicate model
+  verbs, registry, loader, code generator, global model settings, or global
+  pickle reducers.
+
+## Engineering rules
+
+- Do not use `from __future__ import annotations`. Quote a forward reference only
+  when its name is defined later. Eager annotations are required for reliable
+  Pydantic schema transport of notebook-defined classes across Python 3.10-3.14.
+- Preserve the lifecycle-enforcing Pydantic settings documented in `DESIGN.md`.
+  Project-specific policy, such as strictness, belongs in a project base class.
+- Prefer small explicit functions and ordinary Pydantic behavior over new
+  framework layers, dynamic dispatch, registries, or compatibility shims for
+  removed APIs.
+- If behavior changes intentionally, update `DESIGN.md`, public tests, `README.md`,
+  and `SKILL.md` together. Export a new public name explicitly from
+  `src/nshconfig/__init__.py`.
+- Test public behavior and failure boundaries. The golden probes in
+  `tests/typing_probes/` are part of the typing contract; changed diagnostics are
+  behavior changes, not flakes.
+- Transport tests spawn subprocesses as cloudpickle canaries. They are required
+  coverage, not optional slow tests.
