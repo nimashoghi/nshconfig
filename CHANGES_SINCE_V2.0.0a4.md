@@ -7,7 +7,8 @@ This document compares two exact repository states:
 | Role | Version | Git object |
 |---|---|---|
 | Previous alpha | `2.0.0a4` | tag `v2.0.0a4`, commit `1f53da260c958832a55f4bccedd2210e314fef37` |
-| Redesign | `2.0.0a5` | commit `acb28968bc2be13544a8970999c46d18e7a456c9` |
+| Redesign implementation | `2.0.0a5` (staged) | commit `acb28968bc2be13544a8970999c46d18e7a456c9` |
+| Public redesign release | `2.1.0a0` | tag `v2.1.0a0` |
 
 The assumption in the question is therefore correct: `v2.0.0a4` is the direct
 parent of the redesign commit. This is not a comparison with the 0.x series or with
@@ -848,7 +849,7 @@ already present in `v2.0.0a4`; it was not introduced by the redesign.
 
 | Area | v2.0.0a4 | Redesign |
 |---|---|---|
-| Package version | `2.0.0a4` | `2.0.0a5` |
+| Package version | `2.0.0a4` | `2.1.0a0` (`2.0.0a5` was the staged implementation version) |
 | Python metadata | `>=3.10,<4.0` | `>=3.10,<3.15` |
 | Explicit Python classifiers | 3.10 through 3.13 | Python 3 only, 3.10 through 3.14 |
 | Nox Python matrix | 3.10 through 3.13 | 3.10 through 3.14 |
@@ -959,9 +960,10 @@ The new script:
 - passes only the verified artifact paths to `uv publish`;
 - treats `.env` as optional.
 
-The redesign commit declares `2.0.0a5`, but no `v2.0.0a5` tag currently points to
-that implementation commit. The hardened script therefore intentionally refuses to
-publish it until the release tag is created at the exact release commit.
+The implementation commit was staged as `2.0.0a5` and was deliberately not tagged.
+The public redesign release advances the version to `2.1.0a0`; tag `v2.1.0a0`
+identifies the exact release commit and satisfies the hardened script's release-tag
+guard.
 
 ### Documentation
 

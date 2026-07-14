@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.0a5
+## 2.1.0a0
 
 This alpha replaces the legacy mutable configuration API with an explicit lifecycle
 for typed ML-run configuration:
