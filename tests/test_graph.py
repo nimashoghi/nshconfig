@@ -568,7 +568,7 @@ def test_union_collection_preserves_the_drafts_exact_config_class() -> None:
     assert final.child.copied == 7
 
 
-def test_template_defaults_preserve_the_exact_config_union_branch() -> None:
+def test_replayable_defaults_preserve_the_exact_config_union_branch() -> None:
     class First(C.Config):
         kind: Literal["first"] = Field("first", alias="type")
 
@@ -581,27 +581,31 @@ def test_template_defaults_preserve_the_exact_config_union_branch() -> None:
     class Root(C.Config):
         plain: First | Second = Second(wire=7)
         tagged: Tagged = Second(wire=7)
-        deferred: First | Second = Field(default_factory=Second.config_draft)
+        defaulted: First | Second = Second()
 
     direct = Root()
     assert all(
         type(value) is Second
-        for value in (direct.plain, direct.tagged, direct.deferred)
+        for value in (direct.plain, direct.tagged, direct.defaulted)
     )
-    assert (direct.plain.value, direct.tagged.value, direct.deferred.value) == (7, 7, 2)
+    assert (direct.plain.value, direct.tagged.value, direct.defaulted.value) == (
+        7,
+        7,
+        2,
+    )
     assert direct.plain.model_fields_set == direct.tagged.model_fields_set == {"value"}
-    assert direct.deferred.model_fields_set == set()
+    assert direct.defaulted.model_fields_set == set()
 
     work = Root.config_draft()
     assert all(
         type(value) is Second and C.is_draft(value)
-        for value in (work.plain, work.tagged, work.deferred)
+        for value in (work.plain, work.tagged, work.defaulted)
     )
     final = work.config_finalize()
     assert all(
-        type(value) is Second for value in (final.plain, final.tagged, final.deferred)
+        type(value) is Second for value in (final.plain, final.tagged, final.defaulted)
     )
-    assert (final.plain.value, final.tagged.value, final.deferred.value) == (7, 7, 2)
+    assert (final.plain.value, final.tagged.value, final.defaulted.value) == (7, 7, 2)
 
 
 def test_exact_config_branch_wins_over_any_in_a_union() -> None:

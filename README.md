@@ -25,10 +25,10 @@ pip install --pre 'nshconfig[all]'         # both optional features
 `nshconfig` supports Python 3.10 through 3.14 and Pydantic 2.13 through the
 latest Pydantic 2.x release.
 
-## Two construction modes
+## Construction and draft composition
 
-Calling a config class has ordinary Pydantic meaning and returns a validated,
-field-frozen final:
+Calling a config class first performs ordinary Pydantic validation and normally
+returns a field-frozen final:
 
 ```python
 import nshconfig as C
@@ -60,10 +60,10 @@ assert final == Parent(child=Child(x=10, y=2))
 assert C.is_draft(work)  # finalization is non-destructive
 ```
 
-A normally constructed `Config` default is a template. When its parent becomes a
-draft, default-origin children become fresh drafts recursively through annotated
-lists, tuples, mappings, unions, and TypedDict values. An explicitly assigned
-final remains a final.
+A normally constructed final retains enough raw input to be a replayable default.
+When its parent becomes a draft, default-origin children become fresh drafts
+recursively through annotated lists, tuples, mappings, unions, and TypedDict
+values. An explicitly assigned final remains a final.
 
 Required fields with one concrete `Config` annotation lazily create child drafts.
 Reading another unset required field raises `UnsetError`. Draft writes are not
@@ -81,7 +81,7 @@ class Norm(C.Config):
 
 class Model(C.Config):
     dim: int = 768
-    norm: Norm = C.Field(default_factory=Norm.config_draft)
+    norm: Norm = Norm()
 
 
 assert Model().norm.dim == 768
@@ -92,9 +92,21 @@ The callable may use `context.current()`, `parent()`, `root()`, or
 validation has finished. The interpolation result then runs through the target
 field's normal validation pipeline.
 
-Use `C.Field(default_factory=Child.config_draft)` when a default child needs its
-parent's interpolation context. A direct `Child()` default must be valid on its
-own when the parent class body executes.
+`Norm()` first attempts ordinary standalone validation. Because its interpolation
+needs a parent that does not exist yet, it becomes an inert unbound template.
+When `Model()` is validated, the saved constructor recipe runs through Norm's
+normal Pydantic pipeline under the active model, so `dim` becomes `768`.
+
+This constructor fallback is deliberately narrow: at least one interpolation
+must be missing ancestor/root/nearest context or raise `NameError`, and every
+other error must be an omitted required field. Strict type errors, extras,
+validator failures, and ordinary interpolation mistakes still fail immediately.
+`model_validate()`, `TypeAdapter`, and JSON or string validation never create
+templates.
+
+Use direct `child: Child = Child()` defaults for both ordinary and
+parent-dependent children. Factories returning drafts or templates, including
+`C.Field(default_factory=Child.config_draft)`, are rejected.
 
 ## Project composition convention
 
@@ -144,23 +156,26 @@ current concrete contents of a final, use:
 checked = type(final).model_validate(final)
 ```
 
-Drafts cannot be copied or serialized through Pydantic or JSON. Trusted pickle
-transport is the explicit exception described below. Finals use value equality
-and the same field-value hashing rule as frozen Pydantic models: they are hashable
-exactly when all field values are hashable. Freezing is shallow, so lists,
+Drafts cannot be copied or serialized through Pydantic or JSON. Templates are
+immutable, have no readable field values, and cannot be finalized, iterated,
+model-copied, or serialized. They may be inspected with `repr()` or Treescope,
+copied with normal Python copy operations, and carried by trusted pickle or
+cloudpickle. Finals use value equality and the same field-value hashing rule as
+frozen Pydantic models: they are hashable exactly when all field values are
+hashable. Drafts and templates are unhashable. Freezing is shallow, so lists,
 dictionaries, sets, and arbitrary objects retain ordinary Python mutability.
 
 The native lifecycle API is `Config`, `Context`, `interp`, `is_draft`,
-`DraftError`, and `UnsetError`, plus `__version__`; the remaining public names
-are Pydantic authoring re-exports.
+`is_template`, `DraftError`, `TemplateError`, and `UnsetError`, plus
+`__version__`; the remaining public names are Pydantic authoring re-exports.
 
 ## Trusted executable transport
 
-Cloudpickle can transport notebook-local classes, drafts, and interpolation
-callables between compatible trusted environments. Pickle data can execute code;
-never load it from an untrusted source. A final contains concrete values and cannot
-recreate the original draft recipe. Both normal annotations and
-`from __future__ import annotations` are supported.
+Cloudpickle can transport notebook-local classes, drafts, templates, and
+interpolation callables between compatible trusted environments. Pickle data can
+execute code; never load it from an untrusted source. A final contains concrete
+values and cannot recreate the original draft recipe. Both normal annotations
+and `from __future__ import annotations` are supported.
 
 See the [semantic design](https://github.com/nimashoghi/nshconfig/blob/main/DESIGN.md)
 for the complete lifecycle and validation contract.

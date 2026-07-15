@@ -27,6 +27,19 @@ class ImportableRun(C.Config):
         return abs(value)
 
 
+def _copy_importable_width(context: C.Context) -> int:
+    return context.parent(ImportableTemplateParent).width
+
+
+class ImportableTemplateChild(C.Config):
+    copied: int = C.interp(_copy_importable_width)
+
+
+class ImportableTemplateParent(C.Config):
+    width: int = 3
+    child: ImportableTemplateChild = ImportableTemplateChild()
+
+
 def _run_python(script: str, *, env: dict[str, str] | None = None) -> None:
     result = subprocess.run(
         [sys.executable, "-c", script],
@@ -73,6 +86,16 @@ def test_cloudpickle_round_trips_drafts_and_finals():
     receiver_final = restored_work.config_finalize()
     assert receiver_final.width == 5
     assert receiver_final.leaf.derived == 15
+
+
+def test_pickle_and_cloudpickle_preserve_unbound_template_recipes() -> None:
+    template = ImportableTemplateParent.model_fields["child"].default
+    assert C.is_template(template)
+
+    for module in (pickle, cloudpickle):
+        restored = module.loads(module.dumps(template))
+        assert C.is_template(restored)
+        assert ImportableTemplateParent(child=restored).child.copied == 3
 
 
 def test_import_does_not_install_global_pydantic_core_reducers():
@@ -137,7 +160,7 @@ class LocalLeaf(C.Config):
 
 class LocalRun(C.Config):
     width: int
-    leaf: LocalLeaf
+    leaf: LocalLeaf = LocalLeaf()
 
     @C.field_validator("width")
     @classmethod
@@ -155,7 +178,9 @@ final_recipe = LocalRun.config_draft()
 final_recipe.width = -7
 final = final_recipe.config_finalize()
 
-payload = cloudpickle.dumps((draft, final))
+template = LocalRun.model_fields["leaf"].default
+assert C.is_template(template)
+payload = cloudpickle.dumps((draft, final, template))
 Path(os.environ["NSHCONFIG_TRANSPORT_PAYLOAD"]).write_bytes(payload)
 """
 
@@ -170,9 +195,10 @@ import nshconfig as C
 
 
 payload = Path(os.environ["NSHCONFIG_TRANSPORT_PAYLOAD"]).read_bytes()
-draft, sender_final = cloudpickle.loads(payload)
+draft, sender_final, template = cloudpickle.loads(payload)
 
 assert C.is_draft(draft)
+assert C.is_template(template)
 draft.width = -11
 receiver_final = draft.config_finalize()
 
@@ -183,6 +209,9 @@ assert not C.is_draft(sender_final)
 assert sender_final.width == 7
 assert sender_final.leaf.derived == 14
 assert sender_final.model_dump() == {"width": 7, "leaf": {"derived": 14}}
+
+bound_template = type(sender_final)(width=13, leaf=template)
+assert bound_template.leaf.derived == 26
 """
 
 

@@ -46,7 +46,7 @@ A required scalar does not invent a value. Reading it raises `UnsetError` until 
 is assigned. Recursive required Config spines stop with a clear error instead of
 recursing without a base case.
 
-## Final defaults are templates
+## Replayable final defaults
 
 A normally constructed Config final used as a default retains a minimal copy of
 its raw constructor input:
@@ -84,16 +84,17 @@ assert work.child is chosen
 
 The recipe is raw input, not Python source or an AST. A final created without a
 normal constructor recipe, changed through unchecked copy updates, or mutated
-after recipe capture is rejected as a template. This avoids guessing how to
-recreate executable configuration.
+after recipe capture is rejected as a replayable default. This avoids guessing
+how to recreate executable configuration.
 
-Pydantic may copy a declared default. nshconfig preserves the template recipe
-across that normal copy, including for Config values with unhashable fields.
+Pydantic may copy a declared default. nshconfig preserves the recipe across that
+normal copy, including for Config values with unhashable fields.
 
 ## Parent-dependent default children
 
-A direct `Child()` default is validated while the parent class body executes. It
-cannot read a parent that does not yet exist. Defer such a child as a draft:
+A direct `Child()` default first attempts ordinary validation while the parent
+class body executes. Missing parent context turns that constructor call into an
+inert unbound template:
 
 ```python
 class Child(C.Config):
@@ -102,11 +103,35 @@ class Child(C.Config):
 
 class Parent(C.Config):
     source: int = 3
-    child: Child = C.Field(default_factory=Child.config_draft)
+    child: Child = Child()
 ```
 
-The factory runs in the parent's field pipeline. `Parent().child.copied` is `3`,
-and changing `source` on a parent draft changes the finalized child.
+The template contains raw constructor input and binding diagnostics, not partial
+field values. Its recipe runs in the parent's normal Pydantic field pipeline.
+`Parent().child.copied` is `3`, and changing `source` on a parent draft changes
+the finalized child.
+
+Fallback is narrow. At least one interpolation must lack an ancestor, typed root,
+or nearest enclosing model, or raise `NameError`; every other error must be an
+omitted required field. Missing fields alone do not create a template. Strict
+type errors, extras, validators, wrong current/parent types, later-field reads,
+and other failures remain normal validation errors. `model_validate()`,
+`TypeAdapter`, and JSON/string validation never create templates. A forward name
+may defer once, but a repeated `NameError` during binding fails normally.
+
+Use direct `Child()` defaults for ordinary and parent-dependent children. A
+default factory returning a draft or unbound template is rejected, including
+`C.Field(default_factory=Child.config_draft)`.
+
+When a parent draft materializes an unbound template, it becomes a fresh editable
+child draft. Declared field access, mutation, deletion, iteration, finalization,
+model copying, and Pydantic/JSON serialization are invalid on the template itself.
+Use `C.is_template()` to inspect the state. `repr`, Treescope, normal shallow/deep
+copy, and trusted pickle/cloudpickle preserve the inert recipe.
+
+Validators, factories, `model_post_init`, and model validators may run before
+constructor fallback and again during binding. Keep configuration hooks
+deterministic and side-effect-free.
 
 ## Provisional defaults
 
@@ -130,7 +155,8 @@ Draft copying is rejected. Finals support `model_copy()` with native Pydantic
 semantics, including unvalidated `update=` values. Use
 `type(final).model_validate(final)` to revalidate current concrete contents.
 
-Draft equality is identity equality and drafts are unhashable. Finals use value
-equality and frozen-Pydantic field hashing. A final with a list or dictionary field
-is therefore naturally unhashable. Field freezing is shallow and does not freeze
-mutable contents.
+Draft and template equality is identity equality and both are unhashable.
+Templates support normal Python shallow/deep copy but not `model_copy()`. Finals
+use value equality and frozen-Pydantic field hashing. A final with a list or
+dictionary field is therefore naturally unhashable. Field freezing is shallow
+and does not freeze mutable contents.

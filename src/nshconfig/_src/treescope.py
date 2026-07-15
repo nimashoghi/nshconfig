@@ -22,14 +22,24 @@ def render_config(
     from treescope import rendering_parts
 
     from .config import Config
-    from .state import draft_state, is_draft
+    from .state import draft_state, is_draft, is_template, template_state
 
     draft = is_draft(obj)
+    template = is_template(obj)
     d = object.__getattribute__(obj, "__dict__")
     pending = draft_state(obj).pending if draft else {}
     children = []
     items: list[tuple[str, Any, bool]] = []  # (name, value-or-label, dimmed)
-    for name, f in type(obj).__pydantic_fields__.items():
+    if template:
+        for issue in template_state(obj).issues:
+            name = ".".join(str(part) for part in issue.location) or "<root>"
+            label = (
+                "[required input missing]"
+                if issue.kind == "missing"
+                else "[unbound until parent binding]"
+            )
+            items.append((name, rendering_parts.text(label), False))
+    for name, f in () if template else type(obj).__pydantic_fields__.items():
         if name in pending:
             marker = pending[name]
             origin = (
@@ -107,7 +117,7 @@ def render_config(
         children.append(line)
 
     prefix = rendering_parts.siblings(
-        rendering_parts.text("draft ") if draft else rendering_parts.text(""),
+        rendering_parts.text("draft " if draft else "template " if template else ""),
         rendering_parts.maybe_qualified_type_name(type(obj)),
         "(",
     )

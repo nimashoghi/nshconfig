@@ -8,7 +8,8 @@ from pydantic import BaseModel
 from .semantic import is_known_immutable_atom
 
 STATE_KEY = "_nshconfig_state"
-RESERVED_PRIVATE_KEYS = frozenset({STATE_KEY})
+BINDING_KEY = "_nshconfig_binding_issues"
+RESERVED_PRIVATE_KEYS = frozenset({BINDING_KEY, STATE_KEY})
 
 
 def is_path_part(value: Any) -> bool:
@@ -43,12 +44,33 @@ class FinalState:
     value_token: Any = None
 
 
-def state_of(obj: BaseModel) -> DraftState | FinalState | None:
+@dataclass(frozen=True)
+class TemplateIssue:
+    """One validation issue deferred until an unbound template is bound."""
+
+    kind: str
+    location: tuple[Any, ...]
+    message: str
+    field_path: tuple[Any, ...] | None = None
+
+
+@dataclass(frozen=True)
+class TemplateState:
+    """Immutable constructor recipe that still requires an enclosing context."""
+
+    recipe: Recipe
+    issues: tuple[TemplateIssue, ...]
+
+
+def state_of(obj: BaseModel) -> DraftState | FinalState | TemplateState | None:
     """Return nshconfig state without invoking user attribute hooks."""
 
-    private = object.__getattribute__(obj, "__pydantic_private__")
+    try:
+        private = object.__getattribute__(obj, "__pydantic_private__")
+    except AttributeError:
+        return None
     state = private.get(STATE_KEY) if private is not None else None
-    return state if isinstance(state, (DraftState, FinalState)) else None
+    return state if isinstance(state, (DraftState, FinalState, TemplateState)) else None
 
 
 def draft_state(obj: BaseModel) -> DraftState:
@@ -66,8 +88,24 @@ def set_final_state(obj: BaseModel, recipe: Recipe | None = None) -> FinalState:
     if private is None:
         private = {}
         object.__setattr__(obj, "__pydantic_private__", private)
+    private.pop(BINDING_KEY, None)
     state = FinalState(recipe=recipe, value_token=value_token(obj))
     private[STATE_KEY] = state
+    return state
+
+
+def set_template_state(
+    obj: BaseModel,
+    recipe: Recipe,
+    issues: tuple[TemplateIssue, ...],
+) -> TemplateState:
+    """Replace failed constructor state with one inert unbound template."""
+
+    object.__setattr__(obj, "__dict__", {})
+    object.__setattr__(obj, "__pydantic_fields_set__", set())
+    object.__setattr__(obj, "__pydantic_extra__", None)
+    state = TemplateState(recipe=recipe, issues=issues)
+    object.__setattr__(obj, "__pydantic_private__", {STATE_KEY: state})
     return state
 
 
@@ -75,6 +113,59 @@ def is_draft(obj: Any) -> bool:
     """Return whether an object is an nshconfig draft."""
 
     return isinstance(obj, BaseModel) and isinstance(state_of(obj), DraftState)
+
+
+def is_template(obj: Any) -> bool:
+    """Return whether an object is an unbound nshconfig template."""
+
+    return isinstance(obj, BaseModel) and isinstance(state_of(obj), TemplateState)
+
+
+def contains_composition_state(value: Any, active: set[int] | None = None) -> bool:
+    """Inspect an exact built-in graph for a draft or unbound template."""
+
+    if is_draft(value) or is_template(value):
+        return True
+    if type(value) not in {dict, list, tuple, set, frozenset}:
+        return False
+    if active is None:
+        active = set()
+    identity = id(value)
+    if identity in active:
+        return False
+    active.add(identity)
+    try:
+        if type(value) is dict:
+            return any(
+                contains_composition_state(key, active)
+                or contains_composition_state(item, active)
+                for key, item in value.items()
+            )
+        return any(contains_composition_state(item, active) for item in value)
+    finally:
+        active.remove(identity)
+
+
+def template_state(obj: BaseModel) -> TemplateState:
+    """Return template state or fail on an internal lifecycle invariant."""
+
+    state = state_of(obj)
+    assert isinstance(state, TemplateState), "expected an nshconfig template"
+    return state
+
+
+def binding_issues(obj: BaseModel) -> tuple[TemplateIssue, ...]:
+    """Return temporary reasons carried while an unbound recipe is replayed."""
+
+    state = state_of(obj)
+    if isinstance(state, TemplateState):
+        return state.issues
+    try:
+        private = object.__getattribute__(obj, "__pydantic_private__")
+    except AttributeError:
+        return ()
+    issues = private.get(BINDING_KEY, ()) if private is not None else ()
+    return issues if isinstance(issues, tuple) else ()
 
 
 def copy_builtin_graph(value: Any, memo: dict[int, Any] | None = None) -> Any:
@@ -133,6 +224,23 @@ def valid_recipe(obj: BaseModel) -> Recipe | None:
     if value_token(state.recipe.inputs) != state.recipe.input_token:
         return None
     return state.recipe
+
+
+def template_recipe(obj: BaseModel) -> Recipe | None:
+    """Return an intact unbound-template recipe, or None when replay is unsafe."""
+
+    state = state_of(obj)
+    if not isinstance(state, TemplateState):
+        return None
+    if value_token(state.recipe.inputs) != state.recipe.input_token:
+        return None
+    return state.recipe
+
+
+def replay_recipe(obj: BaseModel) -> Recipe | None:
+    """Return an intact recipe from a final replayable default or template."""
+
+    return template_recipe(obj) if is_template(obj) else valid_recipe(obj)
 
 
 def value_token(value: Any, active: set[int] | None = None) -> Any:

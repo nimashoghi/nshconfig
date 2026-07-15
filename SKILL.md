@@ -1,6 +1,6 @@
 ---
 name: using-nshconfig
-description: Builds typed Python configuration with explicit nshconfig drafts, nested default templates, declaration-ordered interpolation, and normal Pydantic validation. Use when defining Config schemas, composing ML run settings, or finalizing drafts.
+description: Builds typed Python configuration with explicit nshconfig drafts, replayable defaults, unbound parent-dependent templates, declaration-ordered interpolation, and normal Pydantic validation. Use when defining Config schemas, composing ML run settings, or finalizing drafts.
 ---
 
 # Using nshconfig
@@ -20,7 +20,7 @@ class Norm(C.Config):
 
 class Model(C.Config):
     dim: int = 768
-    norm: Norm = C.Field(default_factory=Norm.config_draft)
+    norm: Norm = Norm()
 
 
 class Run(C.Config):
@@ -39,8 +39,10 @@ assert C.is_draft(work)
 
 ## Lifecycle rules
 
-- `ConfigType(...)` is ordinary Pydantic construction and returns a validated
-  final. Use `ConfigType.config_draft()` only for mutable composition.
+- `ConfigType(...)` first performs ordinary Pydantic construction and normally
+  returns a validated final. It returns an inert unbound template only for the
+  narrow parent-context failure described below. Use `ConfigType.config_draft()`
+  only for mutable composition.
 - `config_draft()` takes no input and skips validators, default factories,
   private factories, and `model_post_init`.
 - Assign declared fields normally. Assignment is unvalidated. Deleting a field
@@ -54,10 +56,14 @@ assert C.is_draft(work)
 - Draft copies and Pydantic or JSON serialization are rejected. Keep the original
   draft when another variant is needed. Trusted pickle transport is a separate,
   explicit mechanism.
+- `C.is_template(value)` identifies an unbound template. Its fields are not
+  values: field access, mutation, finalization, iteration, model copying, and
+  serialization raise `C.TemplateError` or Pydantic's serializer error. Normal
+  Python copy, `repr`, Treescope, and trusted pickle/cloudpickle are supported.
 
 ## Nested defaults
 
-A normal `Child(...)` final used as a field default is a template:
+A normal `Child(...)` final used as a field default is a replayable default:
 
 ```python
 class Child(C.Config):
@@ -78,16 +84,36 @@ mapping values, and TypedDict values. Mapping keys and set or frozenset members
 stay final because drafts are unhashable. A final explicitly assigned to a draft
 stays final.
 
-Templates retain a minimal raw-constructor recipe. A final created by
+Replayable finals retain a minimal raw-constructor recipe. A final created by
 `model_validate()`, changed through unchecked copy updates, or mutated after its
-recipe was captured is not a valid template. Do not rely on source inspection or
-factory-call analysis.
+recipe was captured is not a valid default recipe. Do not rely on source
+inspection or factory-call analysis.
 
-Use `C.Field(default_factory=Child.config_draft)` when the child has interpolation
-that needs its parent. A direct `Child()` default must validate without a parent
-while the class body executes. Defaults and factories may run again when a
-template is realized, so keep them deterministic and free of external side
-effects.
+A direct `Child()` whose interpolation needs a parent becomes an **unbound
+template**:
+
+```python
+class ParentDependentChild(C.Config):
+    copied: int = C.interp(lambda context: context.parent(Parent).source)
+
+
+class Parent(C.Config):
+    source: int = 1
+    child: ParentDependentChild = ParentDependentChild()
+```
+
+The constructor first tries normal Pydantic validation. It creates a template
+only if at least one interpolation lacks ancestor/root/nearest context or raises
+`NameError`, and all other failures are omitted required fields. Partial values
+are discarded. `model_validate()`, `TypeAdapter`, and JSON/string validation
+never create templates. A repeated `NameError` during binding fails normally, so
+misspelled names are not hidden.
+
+Use direct `Child()` defaults for ordinary and parent-dependent children.
+Factories returning drafts or templates are rejected; do not use
+`C.Field(default_factory=Child.config_draft)`. Validators, factories, and other
+hooks may run once before fallback and again when a recipe binds, so keep them
+deterministic and free of external side effects.
 
 ## Interpolation order
 
@@ -124,11 +150,11 @@ field value, not inside a built-in container.
 - Model-after validators may mutate or replace the result. This can make earlier
   interpolation stale; nshconfig does not run a second pass.
 - `final.model_copy()` and `model_copy(update=...)` follow Pydantic. Updates are
-  not validated. Draft copies are rejected.
+  not validated. Draft and template model copies are rejected.
 - Revalidate concrete current values with
   `type(final).model_validate(final)`. This does not replay old interpolation.
 - Finals are shallowly field-frozen. Mutable field contents remain mutable.
-- Drafts are unhashable. Finals use frozen-Pydantic field hashing and are
+- Drafts and templates are unhashable. Finals use frozen-Pydantic field hashing and are
   hashable exactly when their field values are hashable.
 - Config structure must have concrete annotations. Do not hide a Config in
   `Any`, `object`, or an incompatible built-in container position. Ordinary user

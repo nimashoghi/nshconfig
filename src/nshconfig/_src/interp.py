@@ -22,6 +22,10 @@ M = TypeVar("M", bound=BaseModel)
 PathPart = str | int
 
 
+class _UnboundContextError(AttributeError):
+    """Interpolation needs context that can be supplied by a future parent."""
+
+
 @dataclass(frozen=True)
 class _ModelPath:
     path: tuple[PathPart, ...]
@@ -292,6 +296,11 @@ class _FrameView:
             suffix = f"; did you mean {hint[0]!r}?" if hint else ""
             raise AttributeError(f"{frame.cls.__name__} has no field {name!r}{suffix}")
         if name not in frame.values:
+            if name in frame.unbound:
+                path = _render_path((*frame.path, name))
+                raise _UnboundContextError(
+                    f"{path} depends on context that is not bound yet"
+                )
             child = frame.active_child
             if child is not None and child.path == (*frame.path, name):
                 return _FrameView(child)
@@ -357,7 +366,7 @@ class Context:
             raise AttributeError("parent() levels must be at least 1")
         index = len(self._stack) - 1 - levels
         if index < 0:
-            raise AttributeError(
+            raise _UnboundContextError(
                 f"no ancestor exists {levels} level(s) above this model"
             )
         return self._view_at(index, expected)
@@ -370,6 +379,10 @@ class Context:
 
     def root(self, cls: type[M] | None = None) -> Any:
         """Return the root model of this validation session."""
+        if cls is not None and not issubclass(self._stack[0].cls, cls):
+            raise _UnboundContextError(
+                f"no {cls.__name__} root exists outside this validation tree"
+            )
         return self._view_at(0, cls)
 
     def nearest(self, cls: type[M]) -> M:
@@ -378,7 +391,9 @@ class Context:
             if issubclass(frame.cls, cls):
                 return cast(M, _FrameView(frame))
         chain = " > ".join(frame.cls.__name__ for frame in self._stack)
-        raise AttributeError(f"no enclosing {cls.__name__}; active models: {chain}")
+        raise _UnboundContextError(
+            f"no enclosing {cls.__name__}; active models: {chain}"
+        )
 
     def _view_at(self, index: int, cls: type[M] | None) -> Any:
         frame = self._stack[index]

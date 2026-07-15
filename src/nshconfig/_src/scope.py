@@ -21,11 +21,20 @@ from pydantic_core import (
 from typing_extensions import is_typeddict, override
 
 from .annotations import unwrap_annotation
-from .interp import _MODEL_PATHS, Context, Interp, unwrap_view
+from .interp import (
+    _MODEL_PATHS,
+    _UnboundContextError,
+    Context,
+    Interp,
+    unwrap_view,
+)
 from .state import (
     FinalState,
+    binding_issues,
+    contains_composition_state,
     is_draft,
     is_path_part,
+    is_template,
     set_final_state,
     state_of,
 )
@@ -42,6 +51,8 @@ class _Frame:
     raw: Any
     path: Path
     values: dict[str, Any] = field(default_factory=dict)
+    unbound: set[str] = field(default_factory=set)
+    binding_name_paths: set[Path] = field(default_factory=set)
     active_name: str | None = None
     active_raw: Any = None
     active_child: "_Frame | None" = None
@@ -500,7 +511,9 @@ def _without_marker_defaults(value: Any, active: set[int]) -> Any:
         changed = False
         output: dict[str, Any] = {}
         for key, item in value.items():
-            if key == "default" and isinstance(item, Interp):
+            if key == "default" and (
+                isinstance(item, Interp) or contains_composition_state(item)
+            ):
                 changed = True
                 continue
             if key in {"cls", "function", "metadata", "serialization"}:
@@ -515,10 +528,15 @@ def _without_marker_defaults(value: Any, active: set[int]) -> Any:
 
 
 def serialize_config(value: Any, handler: Any, info: Any) -> Any:
-    """Reject drafts even through TypeAdapter and nested Pydantic serializers."""
+    """Reject composition states through every Pydantic serializer entry point."""
     if is_draft(value):
         raise PydanticSerializationError(
             "nshconfig drafts are not serializable; call config_finalize() first"
+        )
+    if is_template(value):
+        raise PydanticSerializationError(
+            "nshconfig templates are not serializable; bind the template in a "
+            "concrete annotated Config position first"
         )
     return handler(value)
 
@@ -587,6 +605,40 @@ def _evaluate_marker(
     stack_token = _STACK.set(())
     try:
         value = unwrap_view(marker.fn(Context(stack)))
+    except NameError as error:
+        path = _render_path((*frame.path, name))
+        if (*frame.path, name) in frame.binding_name_paths:
+            raise PydanticCustomError(
+                "nshconfig_interpolation",
+                "cannot interpolate {path} using {marker}: {error}",
+                {"path": path, "marker": repr(marker), "error": str(error)},
+            ) from error
+        frame.unbound.add(name)
+        raise PydanticCustomError(
+            "nshconfig_unbound_interpolation",
+            "cannot bind interpolation at {path} using {marker}: {error}",
+            {
+                "path": path,
+                "marker": repr(marker),
+                "error": str(error),
+                "unbound_kind": "name",
+                "field_path": (*frame.path, name),
+            },
+        ) from error
+    except _UnboundContextError as error:
+        frame.unbound.add(name)
+        path = _render_path((*frame.path, name))
+        raise PydanticCustomError(
+            "nshconfig_unbound_interpolation",
+            "cannot bind interpolation at {path} using {marker}: {error}",
+            {
+                "path": path,
+                "marker": repr(marker),
+                "error": str(error),
+                "unbound_kind": "context",
+                "field_path": (*frame.path, name),
+            },
+        ) from error
     except Exception as error:
         path = _render_path((*frame.path, name))
         raise PydanticCustomError(
@@ -628,15 +680,23 @@ def resolve_field(value: Any, info: Any) -> Any:
     name = info.field_name
     assert isinstance(name, str), "Config field wrapper did not receive a field name"
 
+    model_field = frame.cls.__pydantic_fields__[name]
     if not _provided(frame.raw, frame.cls, name):
         from .finalize import default_input
 
         try:
+            if model_field.default_factory is not None and contains_composition_state(
+                value
+            ):
+                raise TypeError(
+                    "a default factory returned a draft or unbound template; use a "
+                    "direct Config() default so nshconfig can bind its recipe"
+                )
             value = default_input(
                 value,
-                frame.cls.__pydantic_fields__[name].annotation,
+                model_field.annotation,
                 _render_path((*frame.path, name)),
-                discriminator=frame.cls.__pydantic_fields__[name].discriminator,
+                discriminator=model_field.discriminator,
             )
         except (TypeError, ValueError) as error:
             raise PydanticCustomError(
@@ -648,7 +708,7 @@ def resolve_field(value: Any, info: Any) -> Any:
                 },
             ) from error
 
-    discriminator = frame.cls.__pydantic_fields__[name].discriminator
+    discriminator = model_field.discriminator
     if (
         isinstance(discriminator, str)
         and isinstance(value, Mapping)
@@ -792,7 +852,33 @@ def interpolation_scope(
         path = ()
         parent_stack = ()
 
-    frame = _Frame(cls, value, path)
+    if is_template(value):
+        from .finalize import default_input
+
+        try:
+            value = default_input(value, cls, _render_path(path))
+        except (TypeError, ValueError) as error:
+            raise PydanticCustomError(
+                "nshconfig_template",
+                "cannot bind template at {path}: {error}",
+                {"path": _render_path(path), "error": str(error)},
+            ) from error
+
+    inherited_name_paths = (
+        parent_stack[-1].binding_name_paths if parent_stack else set()
+    )
+    local_name_paths = {
+        (*path, *issue.field_path)
+        for issue in binding_issues(value)
+        if issue.kind == "name" and issue.field_path is not None
+    }
+
+    frame = _Frame(
+        cls,
+        value,
+        path,
+        binding_name_paths={*inherited_name_paths, *local_name_paths},
+    )
     parent = parent_stack[-1] if parent_stack else None
     old_child = parent.active_child if parent is not None else None
     if parent is not None and direct_child:
@@ -805,7 +891,7 @@ def interpolation_scope(
         if parent is not None and direct_child:
             parent.active_child = old_child
 
-    if isinstance(output, cls) and not is_draft(output):
+    if isinstance(output, cls) and not is_draft(output) and not is_template(output):
         set_final_state(output)
     if not parent_stack:
         _assert_declared_graph(output, cls.__name__, set(), cls)
@@ -831,6 +917,12 @@ def _assert_declared_graph(
         raise PydanticCustomError(
             "nshconfig_pending_draft",
             "a nested draft survived validation at {path}",
+            {"path": path},
+        )
+    if is_template(value):
+        raise PydanticCustomError(
+            "nshconfig_pending_template",
+            "an unbound template survived validation at {path}",
             {"path": path},
         )
 

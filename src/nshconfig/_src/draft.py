@@ -8,17 +8,20 @@ from pydantic import AliasChoices, AliasPath, BaseModel
 from pydantic_core import PydanticUndefined
 
 from .annotations import unwrap_annotation
-from .errors import DraftError, UnsetError
+from .errors import DraftError, TemplateError, UnsetError
 from .interp import Interp
 from .semantic import is_known_immutable_atom
 from .state import (
     STATE_KEY,
     DraftState,
     Recipe,
+    contains_composition_state,
     copy_builtin_graph,
     draft_state,
     is_draft,
-    valid_recipe,
+    is_template,
+    replay_recipe,
+    template_state,
     value_token,
 )
 
@@ -110,6 +113,12 @@ def read_field(obj: BaseModel, name: str) -> Any:
         value = create_draft(child_type)
     else:
         value = _provisional_default(obj, name)
+
+    if model_field.default_factory is not None and contains_composition_state(value):
+        raise UnsetError(
+            f"{type(obj).__name__}.{name} has a default factory that returned a "
+            "draft or unbound template; use a direct Config() default"
+        )
 
     path = f"{type(obj).__name__}.{name}"
     value = project_default(value, model_field.annotation, path)
@@ -309,7 +318,7 @@ def _project_config_default(value: "Config", selected: Any, path: str) -> "Confi
         )
     if is_draft(value):
         return value
-    recipe = valid_recipe(value)
+    recipe = replay_recipe(value)
     if recipe is None:
         raise UnsetError(
             f"{path} uses a Config default without an intact constructor recipe"
@@ -463,10 +472,27 @@ def draft_repr(obj: BaseModel) -> str:
     return f"<draft {type(obj).__name__}({', '.join(bits)})>"
 
 
+def template_repr(obj: BaseModel) -> str:
+    """Render the deferred reasons without pretending a template has field values."""
+
+    state = template_state(obj)
+    bits = []
+    for issue in state.issues:
+        location = ".".join(str(part) for part in issue.location) or "<root>"
+        label = "missing" if issue.kind == "missing" else "unbound"
+        bits.append(f"{location}=[{label}]")
+    return f"<template {type(obj).__name__}({', '.join(bits)})>"
+
+
 def ensure_final(obj: BaseModel) -> None:
     """Shared guard for direct model serialization methods."""
 
     if is_draft(obj):
         raise DraftError(
             "nshconfig drafts are not serializable; call config_finalize() first"
+        )
+    if is_template(obj):
+        raise TemplateError(
+            "nshconfig templates are not serializable; bind the template in a "
+            "concrete annotated Config position first"
         )

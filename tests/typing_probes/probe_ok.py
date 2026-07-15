@@ -24,6 +24,15 @@ class Run(C.Config):
     model: Model
 
 
+class ParentDependentChild(C.Config):
+    copied: int = C.interp(lambda context: context.parent(ForwardParent).source)
+
+
+class ForwardParent(C.Config):
+    source: int = 1
+    child: ParentDependentChild = ParentDependentChild()
+
+
 class ProjectConfig(C.Config):
     model_config = C.ConfigDict(strict=False)
 
@@ -53,6 +62,7 @@ final = work.config_finalize()
 assert_type(final, Model)
 value: int = final.norm.dim
 draft_flag: bool = C.is_draft(work)
+template_flag: bool = C.is_template(ForwardParent.model_fields["child"].default)
 work.dim = 2048
 relaxed = ProjectConfig(count=2)
 positive: int = relaxed.count

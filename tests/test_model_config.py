@@ -131,16 +131,16 @@ def test_global_model_config_mutator_is_not_public_api() -> None:
 
 
 def test_lifecycle_private_attribute_name_is_reserved() -> None:
-    name = "_nshconfig_state"
-    with pytest.raises(TypeError, match=f"reserved private attribute.*{name}"):
-        type(
-            "Invalid",
-            (C.Config,),
-            {
-                "__annotations__": {name: str},
-                name: PrivateAttr(default="user data"),
-            },
-        )
+    for name in ("_nshconfig_binding_issues", "_nshconfig_state"):
+        with pytest.raises(TypeError, match=f"reserved private attribute.*{name}"):
+            type(
+                "Invalid",
+                (C.Config,),
+                {
+                    "__annotations__": {name: str},
+                    name: PrivateAttr(default="user data"),
+                },
+            )
 
 
 def test_every_field_must_validate_its_default_for_canonical_publication() -> None:

@@ -8,15 +8,17 @@ from tests.scenario import ModelConfig, TrainConfig
 
 
 def test_public_api_combines_a_small_lifecycle_with_pydantic_authoring():
-    assert C.__version__ == "2.2.0a0"
+    assert C.__version__ == "2.3.0a0"
     assert {
         "Config",
         "Context",
         "DraftError",
+        "TemplateError",
         "UnsetError",
         "__version__",
         "interp",
         "is_draft",
+        "is_template",
     } < set(C.__all__)
     assert C.ValidationError is ValidationError
     assert C.Field.__module__.startswith("pydantic")

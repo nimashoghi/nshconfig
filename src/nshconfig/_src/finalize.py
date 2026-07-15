@@ -12,9 +12,17 @@ from typing_extensions import NotRequired, ReadOnly, Required, is_typeddict
 from .annotations import unwrap_annotation as _unwrap_annotated
 from .config import Config
 from .draft import field_was_edited
-from .errors import DraftError
+from .errors import DraftError, TemplateError
 from .interp import Interp
-from .state import copy_builtin_graph, draft_state, is_draft, valid_recipe
+from .state import (
+    BINDING_KEY,
+    copy_builtin_graph,
+    draft_state,
+    is_draft,
+    is_template,
+    replay_recipe,
+    template_state,
+)
 
 __all__ = ["finalize"]
 
@@ -26,6 +34,11 @@ def finalize(config: C) -> C:
     """Resolve interpolation and validate one draft without consuming it."""
     if not isinstance(config, Config):
         raise TypeError("config_finalize() expects a Config instance")
+    if is_template(config):
+        raise TemplateError(
+            "an unbound template cannot be finalized by itself; bind it in a "
+            "concrete annotated Config position"
+        )
     if not is_draft(config):
         raise DraftError(
             "config_finalize() expects a draft; this Config is already final. Keep and edit the "
@@ -153,7 +166,7 @@ def _config_default_input(
         values = _collect_draft(value, path, set())
         return _validation_carrier(value, values, discriminator)
 
-    recipe = valid_recipe(value)
+    recipe = replay_recipe(value)
     if recipe is None:
         raise ValueError(
             f"{path} uses a Config default without an intact constructor recipe"
@@ -284,11 +297,26 @@ def _collect_value(
     )
     if isinstance(value, Config):
         if _concrete_config_type(annotation) is not type(value):
-            lifecycle = "draft" if is_draft(value) else "value"
+            lifecycle = (
+                "draft"
+                if is_draft(value)
+                else "template"
+                if is_template(value)
+                else "value"
+            )
             raise ValueError(
                 f"{path} contains a Config {lifecycle} but its annotation does not "
                 "describe that Config structure: this position must name the exact "
                 f"{type(value).__name__} type"
+            )
+        if is_template(value):
+            return _config_default_input(
+                value,
+                annotation,
+                discriminator,
+                path,
+                active,
+                memo,
             )
         values = (
             _collect_draft(value, path, active, memo)
@@ -735,7 +763,7 @@ def _validation_carrier(
     if not replay_recipe and not is_draft(source):
         return source
     assert not (replay_recipe and is_draft(source)), (
-        "only a final Config can replay a constructor recipe"
+        "only a final Config or unbound template can replay a constructor recipe"
     )
     values = dict(values)
     injected: set[str] = set()
@@ -746,8 +774,11 @@ def _validation_carrier(
         model_field = type(source).__pydantic_fields__.get(discriminator)
         if model_field is not None:
             if replay_recipe:
-                data = object.__getattribute__(source, "__dict__")
-                tag = data.get(discriminator, PydanticUndefined)
+                if is_template(source):
+                    tag = model_field.get_default(call_default_factory=False)
+                else:
+                    data = object.__getattribute__(source, "__dict__")
+                    tag = data.get(discriminator, PydanticUndefined)
             else:
                 tag = model_field.get_default(call_default_factory=False)
             if tag is not PydanticUndefined and not isinstance(tag, Interp):
@@ -762,7 +793,12 @@ def _validation_carrier(
         set(source.__pydantic_fields_set__) - injected,
     )
     object.__setattr__(carrier, "__pydantic_extra__", None)
-    object.__setattr__(carrier, "__pydantic_private__", {})
+    private = (
+        {BINDING_KEY: template_state(source).issues}
+        if replay_recipe and is_template(source)
+        else {}
+    )
+    object.__setattr__(carrier, "__pydantic_private__", private)
     return carrier
 
 

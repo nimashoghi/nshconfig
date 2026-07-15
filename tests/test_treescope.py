@@ -40,3 +40,15 @@ def test_final_renders_with_concrete_values():
     text = treescope.render_to_text(final)
     assert "pending" not in text
     assert "768" in text
+
+
+def test_unbound_template_renders_its_binding_reason():
+    class Parent(C.Config):
+        source: int = 1
+
+    class Child(C.Config):
+        copied: int = C.interp(lambda context: context.parent(Parent).source)
+
+    text = treescope.render_to_text(Child())
+    assert "template" in text
+    assert "unbound until parent binding" in text

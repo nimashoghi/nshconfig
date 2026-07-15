@@ -68,7 +68,7 @@ def test_standard_pydantic_nested_construction_stays_standard() -> None:
     assert not C.is_draft(final.child)
 
 
-def test_named_and_recursive_config_defaults_use_the_same_template_rule() -> None:
+def test_named_and_recursive_config_defaults_use_the_same_replay_rule() -> None:
     class Child(C.Config):
         value: int = 1
 
@@ -215,14 +215,15 @@ def test_untouched_nested_factory_reads_are_recomputed_but_edits_are_pinned() ->
     assert calls == [1, 2, 3]
 
 
-def test_draft_default_factory_establishes_parent_interpolation_context() -> None:
+def test_direct_unbound_default_establishes_parent_interpolation_context() -> None:
     class Child(C.Config):
         copied: int = C.interp(lambda context: context.root(Parent).source)
 
     class Parent(C.Config):
         source: int = 3
-        child: Child = Field(default_factory=Child.config_draft)
+        child: Child = Child()
 
+    assert C.is_template(Parent.model_fields["child"].default)
     assert Parent().child.copied == 3
 
     work = Parent.config_draft()
@@ -253,7 +254,7 @@ def test_default_recipe_replays_canonical_field_validation() -> None:
     assert final.child.copied == 11
 
 
-def test_template_recipe_edits_rewrite_alias_paths_without_stale_input() -> None:
+def test_replayable_default_edits_rewrite_alias_paths_without_stale_input() -> None:
     class Child(C.Config):
         value: int = Field(5, validation_alias=AliasPath("payload", "value"))
 
@@ -288,7 +289,7 @@ def test_template_recipe_edits_rewrite_alias_paths_without_stale_input() -> None
         )
 
 
-def test_mutated_or_recipe_less_finals_are_rejected_as_templates() -> None:
+def test_mutated_or_recipe_less_finals_are_rejected_as_replayable_defaults() -> None:
     class Child(C.Config):
         values: list[int] = []
 

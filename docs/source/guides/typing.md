@@ -8,9 +8,10 @@ work = Model.config_draft()       # inferred as Model
 final = work.config_finalize()    # inferred as Model
 ```
 
-Static typing intentionally does not distinguish a draft from a final. The same
-typed object flows through project mutators, while lifecycle misuse fails at
-runtime.
+Static typing intentionally does not distinguish an unbound template, draft, or
+final. `Child()` retains the static type `Child` even when missing parent context
+causes the narrow runtime template fallback. The same typed object flows through
+project mutators, while lifecycle misuse fails at runtime.
 
 ```python
 def resnet50(cfg: Model, *, dim: int = 256) -> Model:
@@ -47,8 +48,10 @@ that is still unavailable when the class is created, define the name and call
 `ConfigType.model_rebuild()` using the same rules as an ordinary Pydantic model.
 
 Names used only inside an interpolation lambda are resolved when the callable
-runs, so a later class may be referenced without turning the field annotation into
-a string.
+runs, so a later parent class may be referenced without turning the field
+annotation into a string. During the parent class body, the first unresolved
+`NameError` creates an unbound child template; binding reruns the callable after
+the parent name exists. A repeated `NameError` then fails validation normally.
 
 ## Supported checker
 

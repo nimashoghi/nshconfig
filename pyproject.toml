@@ -1,6 +1,6 @@
 [project]
 name = "nshconfig"
-version = "2.2.0a0"
+version = "2.3.0a0"
 description = "Typed Python configuration for ML runs with explicit drafts and validated interpolation."
 authors = [{ name = "Nima Shoghi", email = "nimashoghi@gmail.com" }]
 readme = "README.md"

@@ -3,7 +3,8 @@
 `nshconfig` is a small lifecycle layer over Pydantic for typed, Python-first ML
 configuration. Pydantic defines and validates the schema, and nshconfig
 re-exports its authoring API for a single import. `nshconfig` adds explicit
-mutable drafts and declaration-ordered Python interpolation.
+mutable drafts, unbound parent-dependent templates, and declaration-ordered
+Python interpolation.
 
 ```python
 import nshconfig as C
@@ -24,9 +25,12 @@ work.epochs = 100
 run = work.config_finalize()
 ```
 
-Calling `Run(...)` directly remains ordinary validated Pydantic construction.
-Drafts are explicit, mutable, and may be incomplete. Finalization returns a fresh,
-field-frozen Pydantic model without consuming the draft.
+Calling `Run(...)` directly first performs ordinary Pydantic validation. A narrow
+missing-parent interpolation failure produces an inert template that binds when
+used in a concrete parent field; otherwise construction returns a final or raises
+the original validation error. Drafts are explicit, mutable, and may be
+incomplete. Finalization returns a fresh, field-frozen Pydantic model without
+consuming the draft.
 
 There is no configuration language, registry, loader, provenance subsystem,
 record format, or code-generation layer. The [semantic design](contract.md) is the

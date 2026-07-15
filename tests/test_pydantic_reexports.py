@@ -12,10 +12,12 @@ _NSHCONFIG_NAMES = {
     "Config",
     "Context",
     "DraftError",
+    "TemplateError",
     "UnsetError",
     "__version__",
     "interp",
     "is_draft",
+    "is_template",
 }
 _EXCLUDED_PYDANTIC_NAMES = {
     "BaseConfig",

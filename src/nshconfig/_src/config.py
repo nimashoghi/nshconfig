@@ -1,5 +1,6 @@
-"""The Config base class: ordinary validated finals plus explicit mutable drafts."""
+"""Config lifecycle: validated finals, explicit drafts, and unbound templates."""
 
+import copy as copy_module
 import operator
 from collections.abc import Generator, Mapping
 from typing import (
@@ -21,18 +22,31 @@ from .annotations import (
     unwrap_annotation,
     unwrap_type_alias,
 )
-from .draft import delete_field, draft_repr, ensure_final, read_field, set_field
-from .errors import DraftError
+from .draft import (
+    delete_field,
+    draft_repr,
+    ensure_final,
+    read_field,
+    set_field,
+    template_repr,
+)
+from .errors import DraftError, TemplateError
 from .scope import build_config_json_schema, build_config_schema
 from .state import (
     FinalState,
     Recipe,
     RESERVED_PRIVATE_KEYS,
     STATE_KEY,
+    TemplateIssue,
+    binding_issues,
     is_draft,
+    is_template,
     make_recipe,
+    replay_recipe,
     set_final_state,
+    set_template_state,
     state_of,
+    template_state,
     valid_recipe,
     value_token,
 )
@@ -49,6 +63,7 @@ _LIFECYCLE_CONFIG: dict[str, Any] = {
     "from_attributes": False,
 }
 _MISSING_HASH_VALUE = object()
+_UNBOUND_INTERPOLATION_ERROR = "nshconfig_unbound_interpolation"
 _RESERVED_METHODS = frozenset(
     {
         "__copy__",
@@ -169,6 +184,50 @@ def _recipe_from_copy(obj: BaseModel, *, source_was_intact: bool) -> Recipe | No
     return Recipe(inputs=recipe.inputs, input_token=value_token(recipe.inputs))
 
 
+def _template_issues(error: ValidationError) -> tuple[TemplateIssue, ...] | None:
+    """Classify the one validation failure shape eligible for template fallback."""
+
+    details = error.errors(include_url=False)
+    if not any(item["type"] == _UNBOUND_INTERPOLATION_ERROR for item in details):
+        return None
+    if any(
+        item["type"] not in {_UNBOUND_INTERPOLATION_ERROR, "missing"}
+        for item in details
+    ):
+        return None
+    return tuple(
+        TemplateIssue(
+            kind=(
+                str(item.get("ctx", {}).get("unbound_kind", "context"))
+                if item["type"] == _UNBOUND_INTERPOLATION_ERROR
+                else "missing"
+            ),
+            location=tuple(item["loc"]),
+            message=item["msg"],
+            field_path=(
+                tuple(item.get("ctx", {}).get("field_path", ()))
+                if item["type"] == _UNBOUND_INTERPOLATION_ERROR
+                and isinstance(item.get("ctx", {}).get("field_path"), (list, tuple))
+                else None
+            ),
+        )
+        for item in details
+    )
+
+
+def _is_config_draft_factory(factory: Any, config_base: type[Any]) -> bool:
+    """Recognize the inherited classmethod without inspecting arbitrary callables."""
+
+    owner = getattr(factory, "__self__", None)
+    function = getattr(factory, "__func__", None)
+    expected = getattr(config_base.config_draft, "__func__", None)
+    return (
+        isinstance(owner, type)
+        and issubclass(owner, config_base)
+        and function is expected
+    )
+
+
 def _validate_class_shape(cls: type[BaseModel]) -> None:
     is_base = cls.__module__ == __name__ and cls.__name__ == "Config"
     if cls.__pydantic_root_model__:
@@ -244,6 +303,11 @@ def _validate_config_field(cls: type[BaseModel], name: str, model_field: Any) ->
 
     direct_annotation, _ = unwrap_annotation(model_field.annotation, None)
     config_base = globals()["Config"]
+    if _is_config_draft_factory(model_field.default_factory, config_base):
+        raise TypeError(
+            f"{cls.__name__}.{name} uses Config.config_draft as a default factory; "
+            "declare a direct Config() default so its recipe can bind under the parent"
+        )
     direct_config = isinstance(direct_annotation, type) and issubclass(
         direct_annotation, config_base
     )
@@ -255,13 +319,12 @@ def _validate_config_field(cls: type[BaseModel], name: str, model_field: Any) ->
         and not isinstance(model_field.default, Interp)
         and (
             not isinstance(model_field.default, config_base)
-            or valid_recipe(model_field.default) is None
+            or replay_recipe(model_field.default) is None
         )
     ):
         raise TypeError(
             f"{cls.__name__}.{name} has a Config default without an intact "
-            "constructor recipe; use a normally constructed Config value or a "
-            "default factory returning a fresh draft"
+            "constructor recipe; use a normally constructed Config() value"
         )
 
 
@@ -275,7 +338,7 @@ def _validate_config_class(cls: type[BaseModel]) -> None:
 
 
 class Config(BaseModel):
-    """Base class for field-frozen Pydantic configuration with explicit drafts."""
+    """Field-frozen Pydantic configuration with drafts and unbound templates."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -300,7 +363,14 @@ class Config(BaseModel):
                 "Config instances cannot be reinitialized; construct a new final or edit a draft"
             )
         recipe = make_recipe(data)
-        super().__init__(**data)
+        try:
+            super().__init__(**data)
+        except ValidationError as error:
+            issues = _template_issues(error)
+            if issues is None:
+                raise
+            set_template_state(self, recipe, issues)
+            return
         set_final_state(self, recipe)
 
     # This guard is behaviorally equivalent to BaseModel.__init__ for fresh
@@ -385,6 +455,11 @@ class Config(BaseModel):
             raise DraftError(
                 "drafts cannot be copied through model_copy(); keep the original draft"
             )
+        if is_template(self):
+            raise TemplateError(
+                "templates cannot be copied through model_copy(); use copy.copy() or "
+                "copy.deepcopy() to copy the constructor recipe"
+            )
         copied = super().model_copy(update=update, deep=deep)
         recipe = valid_recipe(copied) if not update else None
         set_final_state(copied, recipe)
@@ -392,6 +467,10 @@ class Config(BaseModel):
 
     @override
     def copy(self, *args: Any, **kwargs: Any) -> Self:
+        if is_template(self):
+            raise TemplateError(
+                "templates cannot use Config.copy(); use copy.copy() or copy.deepcopy()"
+            )
         raise TypeError("Config.copy() is unsafe and unsupported; use model_copy()")
 
     @override
@@ -400,6 +479,18 @@ class Config(BaseModel):
             raise DraftError(
                 "drafts cannot be shallow-copied; keep the original draft recipe"
             )
+        if is_template(self):
+            state = template_state(self)
+            inputs = copy_module.copy(state.recipe.inputs)
+            copied = object.__new__(type(self))
+            set_template_state(
+                copied,
+                Recipe(inputs=inputs, input_token=value_token(inputs)),
+                state.issues,
+            )
+            return copied
+        if binding_issues(self):
+            return cast(Self, BaseModel.__copy__(self))
         source_was_intact = valid_recipe(self) is not None
         copied = cast(Self, BaseModel.__copy__(self))
         set_final_state(
@@ -414,6 +505,23 @@ class Config(BaseModel):
             raise DraftError(
                 "drafts cannot be deep-copied; keep the original draft recipe"
             )
+        if is_template(self):
+            state = template_state(self)
+            if memo is None:
+                memo = {}
+            inputs = copy_module.deepcopy(state.recipe.inputs, memo)
+            copied = object.__new__(type(self))
+            memo[id(self)] = copied
+            set_template_state(
+                copied,
+                Recipe(inputs=inputs, input_token=value_token(inputs)),
+                state.issues,
+            )
+            return copied
+        if binding_issues(self):
+            if memo is None:
+                memo = {}
+            return cast(Self, BaseModel.__deepcopy__(self, memo))
         source_was_intact = valid_recipe(self) is not None
         if memo is None:
             memo = {}
@@ -431,7 +539,7 @@ class Config(BaseModel):
         if type(other) is not type(self):
             return False
         assert isinstance(other, Config)
-        if is_draft(self) or is_draft(other):
+        if is_draft(self) or is_draft(other) or is_template(self) or is_template(other):
             return False
         # Lifecycle metadata is not part of value equality. Delegate field
         # semantics to Python while making equality total for hostile or
@@ -460,6 +568,8 @@ class Config(BaseModel):
     def __hash__(self) -> int:
         if is_draft(self):
             raise TypeError(f"unhashable type: '{type(self).__name__}' draft")
+        if is_template(self):
+            raise TypeError(f"unhashable type: '{type(self).__name__}' template")
         fields = tuple(type(self).__pydantic_fields__)
         if not fields:
             return hash(0)
@@ -477,6 +587,8 @@ class Config(BaseModel):
     @override
     def model_fields_set(self) -> set[str]:
         """Return a detached view so callers cannot mutate lifecycle bookkeeping."""
+        if is_template(self):
+            raise TemplateError("an unbound template has no validated field set")
         return set(self.__pydantic_fields_set__)
 
     @property
@@ -484,15 +596,25 @@ class Config(BaseModel):
     def __fields_set__(self) -> set[str]:
         """Detached compatibility view for Pydantic's deprecated public alias."""
 
+        if is_template(self):
+            raise TemplateError("an unbound template has no validated field set")
         return set(self.__pydantic_fields_set__)
 
     @override
     def __repr__(self) -> str:
-        return draft_repr(self) if is_draft(self) else BaseModel.__repr__(self)
+        if is_draft(self):
+            return draft_repr(self)
+        if is_template(self):
+            return template_repr(self)
+        return BaseModel.__repr__(self)
 
     @override
     def __str__(self) -> str:
-        return draft_repr(self) if is_draft(self) else BaseModel.__str__(self)
+        if is_draft(self):
+            return draft_repr(self)
+        if is_template(self):
+            return template_repr(self)
+        return BaseModel.__str__(self)
 
     def __treescope_repr__(self, path: str | None, subtree_renderer: Any) -> Any:
         from .treescope import render_config
@@ -507,6 +629,11 @@ class Config(BaseModel):
     if not TYPE_CHECKING:
 
         def __getattribute__(self, name: str) -> Any:
+            if not name.startswith("_") and is_template(self):
+                raise TemplateError(
+                    f"unbound {type(self).__name__} templates expose no public values; "
+                    "bind this recipe under a parent first"
+                )
             declared_field = (
                 not name.startswith("_") and name in type(self).__pydantic_fields__
             )
@@ -530,6 +657,10 @@ class Config(BaseModel):
             return value
 
         def __setattr__(self, name: str, value: Any) -> None:
+            if is_template(self):
+                raise TemplateError(
+                    f"unbound {type(self).__name__} templates are immutable recipes"
+                )
             if name.startswith("_"):
                 if name == STATE_KEY or is_draft(self):
                     raise AttributeError(
@@ -551,6 +682,10 @@ class Config(BaseModel):
             return BaseModel.__getattr__(self, name)
 
         def __delattr__(self, name: str) -> None:
+            if is_template(self):
+                raise TemplateError(
+                    f"unbound {type(self).__name__} templates are immutable recipes"
+                )
             if name.startswith("_"):
                 if name == STATE_KEY or is_draft(self):
                     raise AttributeError(

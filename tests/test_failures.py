@@ -8,16 +8,18 @@ from pydantic import ValidationError, model_validator
 import nshconfig as C
 
 
-def test_parent_at_validation_root_is_a_structured_field_error():
+def test_parent_at_constructor_root_defers_but_validation_stays_structured():
     class Root(C.Config):
         value: int = C.interp(lambda context: context.parent().missing)
 
+    assert C.is_template(Root())
+
     with pytest.raises(ValidationError) as caught:
-        Root()
+        Root.model_validate({})
 
     (error,) = caught.value.errors(include_url=False)
     assert error["loc"] == ("value",)
-    assert error["type"] == "nshconfig_interpolation"
+    assert error["type"] == "nshconfig_unbound_interpolation"
     assert "no ancestor exists" in error["msg"]
 
 

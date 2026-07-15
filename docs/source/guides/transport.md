@@ -24,9 +24,10 @@ Cloudpickle transports executable Python objects. Never load a pickle from an
 untrusted source. Sender and receiver should use the same Python version and
 compatible nshconfig, Pydantic, and project dependencies.
 
-Drafts retain their assigned values and interpolation callables. Finals retain
-their concrete validated values. A final does not become a draft and cannot
-reconstruct the original composition recipe.
+Drafts retain their assigned values and interpolation callables. Unbound
+templates retain their inert constructor recipes and bind normally after
+restoration. Finals retain their concrete validated values. A final does not
+become a draft and cannot reconstruct the original composition recipe.
 
 Config classes may use eager annotations, quoted forward references, or
 `from __future__ import annotations`. During by-value transport, each Config

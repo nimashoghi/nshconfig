@@ -50,6 +50,12 @@ Nested validation maintains the root-to-current stack. A completed earlier branc
 is visible to later siblings. An ancestor branch still being constructed is not a
 completed value, but its already validated fields may be selected.
 
+During direct `Child()` construction, a missing ancestor, typed root, or nearest
+enclosing model may create an unbound template for later parent binding. A later
+interpolation that reads an earlier unbound field propagates that state. Wrong
+current/parent types and ordinary declaration-order errors remain immediate. See
+[drafts and nested defaults](drafts.md).
+
 ## Read-only values
 
 Config fields, ordinary Pydantic models, mappings, lists, tuples, sets, and

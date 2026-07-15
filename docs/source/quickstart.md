@@ -20,7 +20,7 @@ class Norm(C.Config):
 
 class Model(C.Config):
     dim: int = 768
-    norm: Norm = C.Field(default_factory=Norm.config_draft)
+    norm: Norm = Norm()
 
 
 class Run(C.Config):
@@ -29,11 +29,16 @@ class Run(C.Config):
     model: Model = Model()
 ```
 
-`C.Field(default_factory=Norm.config_draft)` defers the child until `Model` has an
-active validation context. The normal `Optimizer()` and `Model()` finals are
-templates when their parent becomes a draft. Validation is strict by default,
-and attribute docstrings become field descriptions when class source is
-available.
+`Norm()` first attempts ordinary validation. Its missing parent context produces
+an inert unbound template, whose raw constructor recipe binds inside `Model`'s
+normal Pydantic field pipeline. No factory syntax is needed. `Optimizer()` and
+`Model()` are validated finals with replayable default recipes. All three become
+fresh child drafts when their parent default is projected into a draft.
+
+Validation is strict by default, and attribute docstrings become field
+descriptions when class source is available. Factories returning drafts or
+templates, including `C.Field(default_factory=Norm.config_draft)`, are rejected;
+use direct `Norm()` defaults.
 
 ## Compose a draft
 
@@ -94,8 +99,8 @@ schema = Run.model_json_schema()
 checked = Run.model_validate(payload)
 ```
 
-Draft serialization is rejected, including through `TypeAdapter` and nested
-Pydantic serializers.
+Draft and template serialization is rejected, including through `TypeAdapter`
+and nested Pydantic serializers.
 
 ## Build project presets
 

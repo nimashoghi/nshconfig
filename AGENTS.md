@@ -36,22 +36,28 @@ Use `./scripts/publish.sh` only for an intentional release.
 
 - Pydantic owns schemas, aliases, validation, serialization, and JSON Schema.
   nshconfig re-exports its non-deprecated authoring API unchanged.
-- `nshconfig` adds two instance states: a mutable incomplete draft and a
-  validated, shallowly field-frozen final.
-- Calling a `Config` class creates a final. Create composition state only with
-  `ConfigType.config_draft()` and cross the validation boundary with the
-  non-destructive `draft.config_finalize()` method.
-- Normal constructor finals used as defaults are templates. Parent drafts project
-  default-origin Config values to fresh drafts recursively through concrete
-  structural annotations. Explicitly assigned finals remain finals.
+- `nshconfig` adds three instance states: an inert unbound template, a mutable
+  incomplete draft, and a validated, shallowly field-frozen final.
+- Calling a `Config` class first performs normal Pydantic validation. It creates
+  an unbound template only when interpolation lacks enclosing context (or raises
+  `NameError`) and every other error is a missing required field. Other Pydantic
+  entry points never create templates.
+- Create mutable composition state only with `ConfigType.config_draft()` and
+  cross the validation boundary with the non-destructive
+  `draft.config_finalize()` method.
+- Normal constructor finals retain replayable default recipes. Parent-dependent
+  `Child()` defaults become unbound templates and bind under their parent's
+  normal Pydantic pipeline. Parent drafts project both forms to fresh drafts
+  recursively through concrete structural annotations. Explicit finals remain
+  finals. Factories returning drafts or templates are rejected.
 - Interpolation is a whole-field Python callable. Field declaration order is
   dependency order, and interpolation may read only canonical values whose
   complete field validation has already finished.
-- Drafts are unhashable. Finals use frozen-Pydantic field-value hashing and are
-  hashable exactly when their field values are hashable.
+- Drafts and templates are unhashable. Finals use frozen-Pydantic field-value
+  hashing and are hashable exactly when their field values are hashable.
 - `model_copy()` and model validators retain native Pydantic behavior on finals.
-  Draft copies are rejected. Cloudpickle is optional, trusted, short-lived
-  executable transport.
+  Draft copies and template model copies are rejected. Templates support normal
+  Python copy. Cloudpickle is optional, trusted, short-lived executable transport.
 - Structural `Config` positions must have concrete annotations. Drafts and
   interpolation markers may not be hidden under `Any`, `object`, or incompatible
   built-in positions. Arbitrary user objects are opaque.

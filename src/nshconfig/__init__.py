@@ -1,4 +1,4 @@
-"""Typed Python configuration with explicit drafts and Pydantic authoring APIs."""
+"""Typed configuration with drafts, unbound templates, and Pydantic APIs."""
 
 from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
 from importlib.metadata import version as _version
@@ -140,10 +140,12 @@ from pydantic import with_config as with_config
 
 from ._src.config import Config as Config
 from ._src.errors import DraftError as DraftError
+from ._src.errors import TemplateError as TemplateError
 from ._src.errors import UnsetError as UnsetError
 from ._src.interp import Context as Context
 from ._src.interp import interp as interp
 from ._src.state import is_draft as is_draft
+from ._src.state import is_template as is_template
 
 try:
     __version__ = _version(__name__)
@@ -290,8 +292,10 @@ __all__ = [
     "Config",
     "Context",
     "DraftError",
+    "TemplateError",
     "UnsetError",
     "__version__",
     "interp",
     "is_draft",
+    "is_template",
 ]
