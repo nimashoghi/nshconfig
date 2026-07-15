@@ -17,28 +17,28 @@ class BasicConfig(C.Config):
 def test_class_default_and_instance_markers_share_one_validation_boundary():
     assert BasicConfig().class_derived == 8
 
-    work = C.draft(BasicConfig)
+    work = BasicConfig.config_draft()
     work.source = 5
     work.replaceable = C.interp(lambda context: context.current().source + 1)
 
-    final = C.finalize(work)
+    final = work.config_finalize()
     assert final.class_derived == 10
     assert final.replaceable == 6
 
 
 def test_explicit_values_override_markers_and_deletion_reactivates_defaults():
-    work = C.draft(BasicConfig)
+    work = BasicConfig.config_draft()
     work.source = 5
     work.class_derived = 99
     work.replaceable = C.interp(lambda context: context.current().source + 1)
 
-    assert C.finalize(work).class_derived == 99
-    assert C.finalize(work).replaceable == 6
+    assert work.config_finalize().class_derived == 99
+    assert work.config_finalize().replaceable == 6
 
     del work.class_derived
     del work.replaceable
 
-    final = C.finalize(work)
+    final = work.config_finalize()
     assert final.class_derived == 10
     assert final.replaceable == 7
 
@@ -123,7 +123,7 @@ def test_model_before_changes_input_before_fields_and_interpolation_run():
     assert calls == [{"source": 3}]
 
 
-def test_model_after_cannot_change_a_published_field():
+def test_model_after_can_change_a_published_field_with_native_pydantic_semantics():
     class MutatingAfterValidator(C.Config):
         source: int = 3
         copied: int = C.interp(lambda context: context.current().source)
@@ -133,13 +133,8 @@ def test_model_after_cannot_change_a_published_field():
             object.__setattr__(self, "source", self.source + 1)
             return self
 
-    with pytest.raises(ValidationError) as caught:
-        MutatingAfterValidator()
-
-    error = caught.value.errors(include_url=False)[0]
-    assert error["loc"] == ()
-    assert error["type"] == "nshconfig_model_mutation"
-    assert error["ctx"]["field"] == "source"
+    final = MutatingAfterValidator()
+    assert (final.source, final.copied) == (4, 3)
 
 
 def test_typed_and_untyped_selectors_read_the_active_root_to_current_path():
@@ -214,17 +209,17 @@ def test_config_children_in_typed_lists_and_dicts_keep_parent_and_root_context()
         items: list[Item]
         indexed: dict[str, Item]
 
-    first = C.draft(Item)
+    first = Item.config_draft()
     first.value = 1
-    second = C.draft(Item)
+    second = Item.config_draft()
     second.value = 2
 
-    work = C.draft(Collection)
+    work = Collection.config_draft()
     work.scale = 9
     work.items = [first]
     work.indexed = {"second": second}
 
-    final = C.finalize(work)
+    final = work.config_finalize()
     assert not C.is_draft(final.items[0])
     assert not C.is_draft(final.indexed["second"])
     assert final.items[0].value == 1

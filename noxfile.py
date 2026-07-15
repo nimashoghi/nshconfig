@@ -13,7 +13,7 @@ PYDANTIC_REQUIREMENTS = ["pydantic==2.13.0", "pydantic>=2.13,<3"]
 def tests(session: nox.Session, pydantic: str) -> None:
     session.install(
         "-e",
-        ".[transport,treescope]",
+        ".[all]",
         "pytest",
         "pytest-cov",
         "basedpyright==1.36.2",

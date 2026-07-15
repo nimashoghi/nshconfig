@@ -14,7 +14,7 @@ class Model(C.Config):
 
 bad_default: int = C.interp(lambda context: "oops")  # BAD[reportAssignmentType]
 
-work = C.draft(Model)
+work = Model.config_draft()
 work.norm.dim = C.interp(lambda context: "oops")  # BAD[reportAttributeAccessIssue]
 work.norm.dim = C.interp(
     lambda context: context.current(
@@ -26,7 +26,4 @@ work.norm.dim = C.interp(  # BAD[reportAttributeAccessIssue]
 )
 work.norm.dmi = 3  # BAD[reportAttributeAccessIssue]
 work.dim = "1024"  # BAD[reportAttributeAccessIssue]
-bad_result: str = C.finalize(work)  # BAD[reportAssignmentType]
-
-C.Field(default=1)  # BAD[reportAttributeAccessIssue]
-work.config_finalize()  # BAD[reportAttributeAccessIssue]
+bad_result: str = work.config_finalize()  # BAD[reportAssignmentType]

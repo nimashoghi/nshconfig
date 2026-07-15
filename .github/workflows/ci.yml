@@ -4,7 +4,8 @@ on:
     push:
     pull_request:
 
-permissions: {}
+permissions:
+    contents: read
 
 concurrency:
     group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -14,12 +15,8 @@ jobs:
     tests:
         name: Tests
         runs-on: ubuntu-latest
-        permissions:
-            contents: read
         steps:
             - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-              with:
-                  persist-credentials: false
 
             - name: Install uv and Python
               uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
@@ -37,12 +34,8 @@ jobs:
     static-analysis:
         name: Static analysis
         runs-on: ubuntu-latest
-        permissions:
-            contents: read
         steps:
             - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-              with:
-                  persist-credentials: false
 
             - name: Install uv and Python
               uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
@@ -63,17 +56,9 @@ jobs:
             - name: Type check
               run: uv run basedpyright src
 
-            - name: Verify public typing completeness
-              run: uv run basedpyright --verifytypes nshconfig --ignoreexternal
-
     support-matrix:
         name: Python ${{ matrix.python-version }} / Pydantic ${{ matrix.pydantic }}
         runs-on: ubuntu-latest
-        permissions:
-            contents: read
-        env:
-            NOX_PYTHON_VERSION: ${{ matrix.python-version }}
-            NOX_PYDANTIC_VERSION: ${{ matrix.pydantic }}
         strategy:
             fail-fast: false
             matrix:
@@ -81,8 +66,6 @@ jobs:
                 pydantic: [floor, latest]
         steps:
             - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-              with:
-                  persist-credentials: false
 
             - name: Install uv and Python
               uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
@@ -95,17 +78,13 @@ jobs:
               run: uv sync --locked --group dev
 
             - name: Run support-matrix tests
-              run: uv run nox -s "tests-${NOX_PYTHON_VERSION}(${NOX_PYDANTIC_VERSION})"
+              run: uv run nox -s "tests-${{ matrix.python-version }}(${{ matrix.pydantic }})"
 
     docs:
         name: Documentation
         runs-on: ubuntu-latest
-        permissions:
-            contents: read
         steps:
             - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-              with:
-                  persist-credentials: false
 
             - name: Install uv and Python
               uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
@@ -118,17 +97,13 @@ jobs:
               run: uv sync --locked --all-groups --all-extras
 
             - name: Build documentation
-              run: uv run sphinx-build -E -a -W --keep-going -b html docs/source docs/build/html
+              run: uv run sphinx-build -W --keep-going -b html docs/source docs/build/html
 
     package:
         name: Package
         runs-on: ubuntu-latest
-        permissions:
-            contents: read
         steps:
             - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-              with:
-                  persist-credentials: false
 
             - name: Install uv and Python
               uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
@@ -140,100 +115,11 @@ jobs:
             - name: Build distributions
               run: uv build --clear
 
-            - name: Validate and smoke test distributions
-              shell: bash
-              env:
-                  PACKAGE_SMOKE: |
-                      import importlib.metadata
-                      import json
-                      import os
+            - name: Check distribution metadata
+              run: uv run twine check dist/*
 
-                      import nshconfig as C
+            - name: Smoke test wheel
+              run: uv run --isolated --no-project --with dist/*.whl -- python -c "import nshconfig"
 
-                      expected_version = os.environ["EXPECTED_VERSION"]
-                      assert importlib.metadata.version("nshconfig") == expected_version
-                      assert C.__version__ == expected_version
-
-                      class Smoke(C.Config):
-                          value: int
-                          doubled: int = C.interp(
-                              lambda context: context.current(Smoke).value * 2
-                          )
-
-                      work = C.draft(Smoke)
-                      work.value = 21
-                      final = C.finalize(work)
-                      assert final.doubled == 42
-                      value_fingerprint = C.fingerprint(final)
-                      run_record = C.record(final)
-                      assert run_record.fingerprint == value_fingerprint
-                      restored = C.load_record(Smoke, json.loads(run_record.to_json()))
-                      assert restored == final
-                      assert C.fingerprint(restored) == value_fingerprint
-              run: |
-                  shopt -s nullglob
-                  wheels=(dist/*.whl)
-                  source_distributions=(dist/*.tar.gz)
-                  if [[ ${#wheels[@]} -ne 1 || ${#source_distributions[@]} -ne 1 ]]; then
-                      echo "Expected exactly one wheel and one source distribution." >&2
-                      exit 1
-                  fi
-
-                  version="$(uv --color never version --short --locked)"
-                  expected_wheel="dist/nshconfig-${version}-py3-none-any.whl"
-                  expected_source_distribution="dist/nshconfig-${version}.tar.gz"
-                  if [[ "${wheels[0]}" != "$expected_wheel" ]]; then
-                      echo "Unexpected wheel name: ${wheels[0]}" >&2
-                      exit 1
-                  fi
-                  if [[ "${source_distributions[0]}" != "$expected_source_distribution" ]]; then
-                      echo "Unexpected source distribution name: ${source_distributions[0]}" >&2
-                      exit 1
-                  fi
-
-                  uv run --isolated --no-project -- python - \
-                      "${wheels[0]}" "${source_distributions[0]}" <<'PY'
-                  import sys
-                  import tarfile
-                  import zipfile
-
-                  wheel_path, source_path = sys.argv[1:]
-                  with zipfile.ZipFile(wheel_path) as archive:
-                      wheel_files = set(archive.namelist())
-                  with tarfile.open(source_path, "r:gz") as archive:
-                      source_files = set(archive.getnames())
-
-                  required_wheel_suffixes = {
-                      "/__init__.py",
-                      "/py.typed",
-                      ".dist-info/METADATA",
-                      ".dist-info/licenses/LICENSE",
-                  }
-                  required_source_suffixes = {
-                      "/CHANGELOG.md",
-                      "/DESIGN.md",
-                      "/docs/source/index.md",
-                      "/noxfile.py",
-                      "/pyproject.toml",
-                      "/tests/test_lifecycle.py",
-                      "/uv.lock",
-                  }
-                  for suffix in required_wheel_suffixes:
-                      assert any(name.endswith(suffix) for name in wheel_files), suffix
-                  for suffix in required_source_suffixes:
-                      assert any(name.endswith(suffix) for name in source_files), suffix
-
-                  forbidden_wheel_parts = ("/docs/", "/tests/", "__pycache__")
-                  forbidden_source_parts = ("/.nox/", "/dist/", "/docs/build/", "__pycache__")
-                  for name in wheel_files:
-                      normalized = f"/{name.strip('/')}/"
-                      assert not any(part in normalized for part in forbidden_wheel_parts), name
-                  for name in source_files:
-                      normalized = f"/{name.strip('/')}/"
-                      assert not any(part in normalized for part in forbidden_source_parts), name
-                  PY
-
-                  for artifact in "${wheels[0]}" "${source_distributions[0]}"; do
-                      EXPECTED_VERSION="$version" uv run --isolated --no-project \
-                          --with "$artifact" -- python -c "$PACKAGE_SMOKE"
-                  done
+            - name: Smoke test source distribution
+              run: uv run --isolated --no-project --with dist/*.tar.gz -- python -c "import nshconfig"

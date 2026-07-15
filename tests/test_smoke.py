@@ -1,4 +1,4 @@
-"""The small public API and one complete notebook-style workflow."""
+"""The native lifecycle API and one complete notebook-style workflow."""
 
 import pytest
 from pydantic import ValidationError
@@ -7,43 +7,34 @@ import nshconfig as C
 from tests.scenario import ModelConfig, TrainConfig
 
 
-def test_public_api_is_deliberately_small():
-    assert C.__all__ == [
+def test_public_api_combines_a_small_lifecycle_with_pydantic_authoring():
+    assert C.__version__ == "2.2.0a0"
+    assert {
         "Config",
         "Context",
         "DraftError",
-        "Event",
-        "Explanation",
-        "FingerprintError",
-        "RecordError",
-        "RunRecord",
         "UnsetError",
         "__version__",
-        "draft",
-        "explain",
-        "finalize",
-        "fingerprint",
         "interp",
         "is_draft",
-        "load_record",
-        "provenance",
-        "record",
-        "source",
-    ]
-    assert not hasattr(C, "Field")
-    assert not hasattr(C, "BaseModel")
+    } < set(C.__all__)
+    assert C.ValidationError is ValidationError
+    assert C.Field.__module__.startswith("pydantic")
+    assert C.BaseModel.__module__.startswith("pydantic")
     assert not hasattr(C, "thaw")
+    assert not hasattr(C, "draft")
+    assert not hasattr(C, "finalize")
 
 
 def test_scenario_end_to_end():
-    work = C.draft(TrainConfig)
+    work = TrainConfig.config_draft()
     work.model.dim = 1024
     work.model.encoder.ln.dim = C.interp(
         lambda context: context.nearest(ModelConfig).dim
     )
     work.model.decoder.ln.dim = 64
 
-    final = C.finalize(work)
+    final = work.config_finalize()
 
     assert final.model.encoder.ln.dim == 1024
     assert final.model.decoder.ln.dim == 64
@@ -73,11 +64,11 @@ def test_direct_construction_produces_a_final():
 
 
 def test_one_draft_supports_a_non_destructive_sweep():
-    work = C.draft(TrainConfig)
+    work = TrainConfig.config_draft()
     work.model.dim = 128
-    first = C.finalize(work)
+    first = work.config_finalize()
     work.model.dim = 256
-    second = C.finalize(work)
+    second = work.config_finalize()
 
     assert first.model.head.dim == 128
     assert second.model.head.dim == 256

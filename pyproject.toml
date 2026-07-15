@@ -1,12 +1,12 @@
 [project]
 name = "nshconfig"
-version = "2.1.0a0"
-description = "Typed Python configuration for ML runs: drafts, derived values, provenance, and reproducible records."
+version = "2.2.0a0"
+description = "Typed Python configuration for ML runs with explicit drafts and validated interpolation."
 authors = [{ name = "Nima Shoghi", email = "nimashoghi@gmail.com" }]
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.10,<3.15"
+requires-python = ">=3.10,<4.0"
 dependencies = ["pydantic>=2.13,<3", "typing-extensions"]
 keywords = [
     "config",
@@ -15,14 +15,12 @@ keywords = [
     "hyperparameters",
     "machine-learning",
     "interpolation",
-    "provenance",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -32,9 +30,9 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+all = ["cloudpickle>=3.1.2", "treescope"]
 treescope = ["treescope"]
 transport = ["cloudpickle>=3.1.2"]
-docs = ["sphinx", "sphinx-rtd-theme", "myst-parser", "sphinx-copybutton"]
 
 [project.urls]
 homepage = "https://github.com/nimashoghi/nshconfig"
@@ -56,18 +54,15 @@ dev = [
     "sphinx-rtd-theme",
     "myst-parser",
     "sphinx-copybutton",
+    "twine",
 ]
 
 [tool.uv]
 constraint-dependencies = ["urllib3>=2.6.3"]
 
 [build-system]
-requires = ["uv_build==0.11.28"]
+requires = ["uv_build>=0.11.28,<0.12.0"]
 build-backend = "uv_build"
-
-[tool.uv.build-backend]
-source-include = ["CHANGELOG.md", "DESIGN.md", "docs/**", "noxfile.py", "tests/**", "uv.lock"]
-source-exclude = ["/docs/build"]
 
 [tool.basedpyright]
 # typing_probes are golden fixtures (deliberate errors), checked explicitly by
@@ -99,6 +94,3 @@ ignore = ["E731", "E741"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "--cov=nshconfig --cov-report=term-missing"
-filterwarnings = [
-    "ignore:The chararray class is deprecated and will be removed in a future release.*:DeprecationWarning:treescope\\.canonical_aliases",
-]

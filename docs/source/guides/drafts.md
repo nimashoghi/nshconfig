@@ -1,169 +1,136 @@
-# Drafts and finals
+# Drafts and nested defaults
 
-`C.draft(ConfigType)` creates a real instance of `ConfigType` without running
-field validators, model validators, default factories, or `model_post_init`. It
-takes no seed keyword arguments. Assignment is the initial input path; tracked
-built-in container mutations can then update an assigned or materialized value.
+## Explicit lifecycle
 
-The [semantic contract](../contract.md) defines the complete lifecycle and
-supported value graph.
+`ConfigType(...)` returns a validated final. `ConfigType.config_draft()` returns a
+mutable incomplete instance of the same static type:
 
 ```python
-from pydantic import Field
-
-import nshconfig as C
-
-
-class Optimizer(C.Config):
-    learning_rate: float = 3e-4
+class Job(C.Config):
+    workers: int
+    labels: list[str] = []
 
 
-class Run(C.Config):
-    optimizer: Optimizer
-    epochs: int
-    tags: set[str] = Field(default_factory=set)
-    parameters: dict[str, int] = Field(default_factory=dict)
-
-
-work = C.draft(Run)
-work.epochs = 100
-work.optimizer.learning_rate = 1e-4
-assert C.is_draft(work)
+final = Job(workers=8)
+work = Job.config_draft()
+work.workers = 8
 ```
 
-## Draft behavior
+Draft creation does not run field validators, model validators, default factories,
+private factories, or `model_post_init`. Assignment stores an unvalidated value.
+Unknown attributes fail immediately.
 
-A draft supports ordinary assignment and deletion of declared fields. An unknown
-attribute fails immediately, with a close-name suggestion when one is available.
-Private attributes are intentionally initialized only during final validation, so
-private writes and deletions on a draft are rejected instead of being silently lost.
+`work.config_finalize()` crosses the Pydantic validation boundary and returns a
+fresh final. The original draft remains editable and can produce another variant.
+Calling `config_finalize()` on a final raises `DraftError`.
+
+## Required child spines
+
+A missing required field whose direct annotation is one concrete Config type
+creates a child draft on first access:
 
 ```python
-work.epochs = 200
-del work.epochs        # restore the class default or missing state
+class Leaf(C.Config):
+    width: int
 
-try:
-    work.epochs
-except C.UnsetError:
-    pass
 
-work.epochs = 100
-# work.epohcs = 200    # AttributeError, with a suggestion for "epochs"
+class Root(C.Config):
+    leaf: Leaf
+
+
+work = Root.config_draft()
+work.leaf.width = 256
 ```
 
-Reading a required scalar before assignment raises `UnsetError`. Reading a pending
-interpolation also raises `UnsetError`; derived values become available on the
-final. A required field whose annotation is one concrete `Config` subclass
-auto-creates as a child draft when accessed. Unions and optional config fields do
-not auto-create because the intended type is ambiguous.
+A required scalar does not invent a value. Reading it raises `UnsetError` until it
+is assigned. Recursive required Config spines stop with a clear error instead of
+recursing without a base case.
 
-Keep a direct `Config` field required or give it an `interp()` default. Class
-creation rejects a concrete `Config`, mapping, `None`, or default factory because
-each would create the child without an explicit parent interpolation context.
+## Final defaults are templates
 
-Ordinary class defaults are readable. A default factory may run to provide an
-interactive draft value. That value is provisional: if it remains untouched,
-`finalize()` omits it and lets Pydantic recompute it from validated inputs. Mutating
-a provisional built-in `list`, `dict`, or `set` pins it as user input and records a
-mutation event.
-
-Arbitrary non-collection user objects, dataclasses, and plain Pydantic models are
-atomic rather than recursively proxied. Assigning one preserves its identity. A draft refuses to
-expose one from a provisional default because internal mutation cannot be tracked
-and a data-aware factory may need recomputation. Assign it explicitly or read it
-after finalization.
+A normally constructed Config final used as a default retains a minimal copy of
+its raw constructor input:
 
 ```python
-work.tags.add("ablation")
-work.parameters["layers"] = 24
+class Child(C.Config):
+    width: int = 128
+
+
+DEFAULT_CHILD = Child(width=256)
+
+
+class Parent(C.Config):
+    child: Child = DEFAULT_CHILD
+    stages: list[Child] = [Child(width=512)]
 ```
 
-Drafts cannot be serialized. `model_dump()`, `model_dump_json()`, nested Pydantic
-serialization, and `TypeAdapter` serialization all reject them. Use trusted
-cloudpickle transport when executable draft state must cross a process boundary;
-see [transport, security, and environments](transport.md).
+On `Parent.config_draft()`, default-origin children become fresh drafts. Inline
+and named defaults follow the same rule. Projection recurses through:
 
-Drafts also reject `copy.copy()`, `copy.deepcopy()`, `model_copy()`, the deprecated
-`Config.copy()`, and direct `__init__` reentry. These paths could duplicate or
-replace values without preserving a truthful composition history.
+- direct concrete Config fields;
+- supported union branches;
+- list and tuple elements;
+- mapping values and TypedDict values.
 
-## Finalization
+Mapping keys and set or frozenset members stay final because drafts are
+unhashable. A final explicitly assigned to a draft also stays final:
 
-`C.finalize(work)` recursively collects the supported graph, resolves
-interpolation, and asks Pydantic to validate the result. The original draft is not
-consumed and can be finalized repeatedly after further edits.
+```python
+chosen = Child(width=1024)
+work = Parent.config_draft()
+work.child = chosen
+assert work.child is chosen
+```
 
-The recursive structural graph contains `Config` nodes and exact built-in `dict`,
-`list`, `tuple`, `set`, and `frozenset` values. It must be finite and acyclic.
-`TypedDict`, abstract mapping and sequence annotations, unions, and named type
-aliases may describe those concrete built-ins. Every structural config position
-needs a concrete annotation; hiding a config draft under `Any` or `object` fails
-with its graph path. An interpolation marker may occupy one complete config field,
-not a nested container position or mapping key.
+The recipe is raw input, not Python source or an AST. A final created without a
+normal constructor recipe, changed through unchecked copy updates, or mutated
+after recipe capture is rejected as a template. This avoids guessing how to
+recreate executable configuration.
 
-Dataclasses, ordinary Pydantic models, and arbitrary non-collection user values are
-atomic. Pydantic may reconstruct a dataclass according to its schema; ordinary
-models and arbitrary objects normally keep input identity. Atomic values cannot hold
-`Config` nodes or pending lifecycle values. A model-before validator may normalize
-custom input, but any custom
-collection left after that hook is rejected even when finite. Lazy synchronous and
-asynchronous containers, iterators, generators, awaitables, and coroutines are also
-rejected; materialize and await them before validation.
+Pydantic may copy a declared default. nshconfig preserves the template recipe
+across that normal copy, including for Config values with unhashable fields.
 
-Arbitrary mapping keys are supported only when the corresponding values contain no
-`Config` structure. A mapping path containing a config requires exact `str` or
-`int` keys. Lifecycle checks inspect accessible Python object state and known
-carrier objects, including functions, bound methods, partials, and weak references.
-Opaque callables are rejected when their captured state cannot be inspected. Other
-truly opaque extension state cannot be proven safe and must not conceal lifecycle
-state. Containers internal to an atomic object remain implementation detail rather
-than Config structural nodes.
+## Parent-dependent default children
 
-Repeated built-in containers and child drafts are expanded by value. If the same
-child draft appears twice, the final contains two equal, independently validated
-config values. Arbitrary non-collection user objects remain atomic identity values.
+A direct `Child()` default is validated while the parent class body executes. It
+cannot read a parent that does not yet exist. Defer such a child as a draft:
 
-A previously final config can be inserted as a branch only if it has no
-interpolation history. Since finals are shallowly frozen, the library cannot prove
-that a mutable dependency of an old interpolation is unchanged or recompute the
-recipe. Assignment and other non-interpolation provenance is preserved and rebased.
-Reading the final or calling `C.explain()` or `C.provenance()` does not affect this
-decision.
+```python
+class Child(C.Config):
+    copied: int = C.interp(lambda context: context.parent(Parent).source)
 
-## Final behavior
 
-Calling a `Config` class normally also creates a validated final. Finals are
-ordinary Pydantic models with field rebinding disabled. Pydantic's freeze is
-shallow, so contained lists and dictionaries remain normal mutable Python objects.
+class Parent(C.Config):
+    source: int = 3
+    child: Child = C.Field(default_factory=Child.config_draft)
+```
 
-The instance visible inside `model_post_init` or a model-after validator is still
-in-progress. It becomes a final only after model hooks return and lifecycle checks
-succeed. Serialization, copying, iteration, `finalize()`, provenance queries,
-fingerprinting, and recording reject that in-progress instance.
+The factory runs in the parent's field pipeline. `Parent().child.copied` is `3`,
+and changing `source` on a parent draft changes the finalized child.
 
-All configs are unhashable because their allowed values may be mutable or
-user-defined. Final equality compares the concrete class and declared values;
-provenance does not affect it. Draft equality is identity equality. Use
-`C.fingerprint(final)` when deterministic content identity is required.
+## Provisional defaults
 
-Finals reject `model_copy(update=...)`, the deprecated `Config.copy()`, and direct
-`__init__` reentry. An unchanged final may use `copy.copy()`, `copy.deepcopy()`, or
-`model_copy()` without updates.
+Safe scalar and built-in container defaults may be read from a draft. Built-in
+containers are copied before exposure. The draft remembers a structural baseline:
 
-`C.finalize(final)` revalidates the final's concrete values into a new object. It
-preserves `model_fields_set` at every config node and copies provenance, but it does
-not execute interpolation callables. Validators run again and must be idempotent on
-canonical input. Revalidation rejects a validator that mutates the source final or
-changes its values or explicit-field metadata. The structural input is isolated
-before validators run, so a failure cannot mutate the source. A final containing an
-identity-bearing mutable atomic value is not revalidatable without changing identity;
-rebuild it from a draft or mapping.
+- an untouched value is omitted at finalization, so Pydantic recomputes the
+  canonical default or factory result;
+- an in-place mutation is supplied as explicit input;
+- editing a projected child draft makes its enclosing default branch explicit.
 
-The internal integrity snapshots used during finalization are stricter than public
-Python equality. They detect structural replacement, mutation, and aliasing even
-when a user-defined value compares equal; they do not change the equality behavior
-of the returned final.
+Simply reading a nested child's own default does not pin the branch. Built-in
+containers are ordinary Python values, not tracking subclasses.
 
-The original draft is the only composition recipe. There is no operation that can
-recover interpolation callables or a sequence of Python mutations from a concrete
-final or JSON record.
+Arbitrary mutable defaults are opaque and cannot be observed provisionally. Assign
+an explicit value or read the value from the final instead.
+
+## Copy, equality, and hashing
+
+Draft copying is rejected. Finals support `model_copy()` with native Pydantic
+semantics, including unvalidated `update=` values. Use
+`type(final).model_validate(final)` to revalidate current concrete contents.
+
+Draft equality is identity equality and drafts are unhashable. Finals use value
+equality and frozen-Pydantic field hashing. A final with a list or dictionary field
+is therefore naturally unhashable. Field freezing is shallow and does not freeze
+mutable contents.

@@ -2,11 +2,8 @@
 
 from collections.abc import (
     AsyncIterable,
-    AsyncGenerator,
     AsyncIterator,
-    Awaitable,
     Collection,
-    Coroutine,
     Generator,
     Iterable,
     Iterator,
@@ -17,8 +14,6 @@ from collections.abc import (
     Sequence,
     Set,
 )
-from dataclasses import is_dataclass
-from enum import Enum
 from types import UnionType
 import typing
 from typing import (
@@ -33,14 +28,7 @@ from typing import (
     get_type_hints,
 )
 
-from typing_extensions import (
-    NotRequired,
-    ReadOnly,
-    Required,
-    TypeAliasType as _ExtensionsTypeAliasType,
-    is_typeddict,
-)
-from pydantic import BaseModel
+from typing_extensions import TypeAliasType as _ExtensionsTypeAliasType, is_typeddict
 
 _NativeTypeAliasType = getattr(typing, "TypeAliasType", None)
 
@@ -64,11 +52,8 @@ _ALLOWED_CONTAINER_ORIGINS = {
     tuple,
 }
 _LAZY_CONTAINER_ORIGINS = {
-    AsyncGenerator,
     AsyncIterable,
     AsyncIterator,
-    Awaitable,
-    Coroutine,
     Generator,
     Iterable,
     Iterator,
@@ -126,20 +111,20 @@ def _substitute_type_parameters(
         active.remove(identity)
     if replaced == arguments:
         return annotation
-    copier = getattr(annotation, "copy_with", None)
-    if callable(copier):
-        try:
-            return copier(replaced)
-        except (AttributeError, TypeError, ValueError):
-            pass
     origin = get_origin(annotation)
+    if origin is Annotated:
+        return cast(Any, Annotated)[replaced]
     if origin is UnionType:
         output = replaced[0]
         for argument in replaced[1:]:
             output = output | argument
         return output
-    if origin is Annotated:
-        return cast(Any, Annotated).__class_getitem__(replaced)
+    copier = getattr(annotation, "copy_with", None)
+    if callable(copier):
+        try:
+            return copier(replaced)
+        except (AssertionError, AttributeError, TypeError, ValueError):
+            pass
     if origin is not None:
         try:
             return origin[replaced[0] if len(replaced) == 1 else replaced]
@@ -155,10 +140,6 @@ def unwrap_annotation(annotation: Any, discriminator: Any) -> tuple[Any, Any]:
         normalized = unwrap_type_alias(annotation)
         if normalized is not annotation:
             annotation = normalized
-            continue
-        if get_origin(annotation) in {Required, NotRequired, ReadOnly}:
-            arguments = get_args(annotation)
-            annotation = arguments[0] if arguments else Any
             continue
         if get_origin(annotation) is not Annotated:
             return annotation, discriminator
@@ -225,11 +206,7 @@ def _unsupported_container_annotation(annotation: Any, active: set[int]) -> str 
         return getattr(candidate, "__qualname__", str(candidate))
     if isinstance(candidate, type) and candidate not in _SCALAR_COLLECTION_TYPES:
         try:
-            if issubclass(candidate, (BaseModel, Enum)) or is_dataclass(candidate):
-                return None
             if issubclass(candidate, Collection):
-                return candidate.__qualname__
-            if issubclass(candidate, (Iterable, AsyncIterable, Awaitable)):
                 return candidate.__qualname__
         except TypeError:
             pass

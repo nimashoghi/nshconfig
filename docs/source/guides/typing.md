@@ -1,70 +1,57 @@
 # Typing
 
-[basedpyright](https://docs.basedpyright.com/) is the supported type checker. The
-repository keeps passing and intentionally failing probe files under
-`tests/typing_probes/`; their diagnostics are part of the public contract.
-
-The [semantic contract](../contract.md) defines the runtime checks that complement
-the static guarantees.
-
-## Statically checked
-
-A draft has the same static type as its config class. Editors and basedpyright
-therefore check ordinary field reads, assignments, and helper signatures:
+`Config` uses Pydantic's dataclass transform for ordinary construction. The two
+lifecycle methods return `Self`:
 
 ```python
-def large_model(work: Model) -> None:
-    work.dim = 1024
-    work.norm.dim = C.interp(lambda context: context.parent(Model).dim)
-
-
-work = C.draft(Model)
-large_model(work)
-final: Model = C.finalize(work)
+work = Model.config_draft()       # inferred as Model
+final = work.config_finalize()    # inferred as Model
 ```
 
-`interp()` is typed like Pydantic's default helpers: its public result type is the
-callable's return type even though its runtime value is a pending marker until
-validation. A wrong resolver return type is therefore reported both in a class
-default and in a draft assignment.
-
-Passing a config class to a context selector provides checked fields:
+Static typing intentionally does not distinguish a draft from a final. The same
+typed object flows through project mutators, while lifecycle misuse fails at
+runtime.
 
 ```python
-context.current(LayerNorm).dim
-context.parent(Model).dim
-context.parent(2, Run).optimizer
-context.root(Run).model
-context.nearest(Model).dim
+def resnet50(cfg: Model, *, dim: int = 256) -> Model:
+    cfg.dim = dim
+    return cfg
 ```
 
-Import Pydantic authoring APIs directly so their native type information remains
-visible:
+Draft field assignments are checked against declared field types. Runtime draft
+assignment remains unvalidated, so a suppressed type error still fails during
+finalization.
+
+## Typed interpolation context
+
+Pass the expected Config type to a selector for checked field access:
 
 ```python
-from pydantic import ConfigDict, Field, ValidationInfo, field_validator
+class Leaf(C.Config):
+    copied: int = C.interp(lambda context: context.parent(Model).dim)
 ```
 
-## Runtime-only properties
+`current(Model)`, `parent(Model)`, `parent(2, Model)`, `root(Run)`, and
+`nearest(Model)` return the requested static type. Selector reachability and field
+declaration order remain runtime properties.
 
-The type checker does not prove:
+## Annotation evaluation
 
-- whether an instance is currently a draft or final;
-- whether a requested ancestor exists in a particular validation tree;
-- whether a source field has already completed validation;
-- fields accessed through an untyped selector such as `context.root()`.
+Normal eager annotations, explicit quoted forward references, and
+`from __future__ import annotations` are all supported across Python 3.10 through
+3.14. The optional trusted cloudpickle transport also supports these forms for
+notebook-local Config classes.
 
-`C.is_draft()` handles lifecycle checks at runtime. Interpolation resolution and
-Pydantic validation handle reachability, order, and dynamic access.
+Name resolution otherwise follows Pydantic. If an annotation refers to a name
+that is still unavailable when the class is created, define the name and call
+`ConfigType.model_rebuild()` using the same rules as an ordinary Pydantic model.
 
-Drafts and finals intentionally share one static type. Finals use Pydantic's
-`model_config`-level freeze, which basedpyright does not turn into a read-only class;
-runtime assignment to a final still fails. Pydantic's mypy plugin applies different
-frozen-model rules and is not the supported checker for the draft-mutation idiom.
+Names used only inside an interpolation lambda are resolved when the callable
+runs, so a later class may be referenced without turning the field annotation into
+a string.
 
-## Annotation rule
+## Supported checker
 
-Do not enable `from __future__ import annotations` in config modules. Use normal
-eager annotations and quote only a true forward reference whose name is defined
-later. This keeps Pydantic schemas reliable for notebook and cloudpickle transport
-across the supported Python versions.
+[basedpyright](https://docs.basedpyright.com/) is the checked contract. The
+repository includes positive and negative golden probes under
+`tests/typing_probes/`. Diagnostic changes are treated as typing behavior changes.

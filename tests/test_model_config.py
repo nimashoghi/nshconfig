@@ -3,7 +3,8 @@
 import json
 import subprocess
 import sys
-from typing import Annotated, Any, Literal
+from enum import Enum
+from typing import Annotated, Any, Literal, TypeVar
 
 import pytest
 from pydantic import (
@@ -27,6 +28,11 @@ from typing_extensions import TypeAliasType
 import nshconfig as C
 
 
+class _DocumentedConfig(C.Config):
+    batch_size: int = 32
+    """Number of examples processed in one optimization step."""
+
+
 def test_builtin_policy_is_strict_and_forbids_extra_input() -> None:
     class Builtin(C.Config):
         count: int
@@ -37,7 +43,19 @@ def test_builtin_policy_is_strict_and_forbids_extra_input() -> None:
 
     with pytest.raises(ValidationError) as extra:
         Builtin.model_validate({"count": 1, "unknown": 2})
-    assert extra.value.errors()[0]["type"] == "nshconfig_extra_final"
+    assert extra.value.errors()[0]["type"] == "extra_forbidden"
+
+
+def test_builtin_policy_uses_attribute_docstrings_as_descriptions() -> None:
+    assert _DocumentedConfig.model_config["use_attribute_docstrings"] is True
+    description = "Number of examples processed in one optimization step."
+    assert _DocumentedConfig.model_fields["batch_size"].description == description
+    assert (
+        _DocumentedConfig.model_json_schema()["properties"]["batch_size"][
+            "description"
+        ]
+        == description
+    )
 
 
 @pytest.mark.parametrize(
@@ -87,23 +105,18 @@ def test_project_base_can_change_non_lifecycle_policies() -> None:
     class Value(C.Config):
         value: int
 
-    with pytest.raises(ValidationError) as attributes:
-        Value.model_validate(AttributeInput(), from_attributes=True)
-    assert attributes.value.errors()[0]["type"] == "nshconfig_attribute_input"
+    assert Value.model_validate(AttributeInput(), from_attributes=True).value == 3
+    assert (
+        TypeAdapter(Value).validate_python(AttributeInput(), from_attributes=True).value
+        == 3
+    )
 
-    with pytest.raises(ValidationError) as adapter_attributes:
-        TypeAdapter(Value).validate_python(AttributeInput(), from_attributes=True)
-    assert adapter_attributes.value.errors()[0]["type"] == "nshconfig_attribute_input"
-
-    for validate in (
-        lambda: Value.model_validate({"value": 1, "extra": 2}, extra="ignore"),
-        lambda: TypeAdapter(Value).validate_python(
-            {"value": 1, "extra": 2}, extra="allow"
-        ),
-    ):
-        with pytest.raises(ValidationError) as extra:
-            validate()
-        assert extra.value.errors()[0]["type"] == "nshconfig_extra_final"
+    ignored = Value.model_validate({"value": 1, "extra": 2}, extra="ignore")
+    allowed = TypeAdapter(Value).validate_python(
+        {"value": 1, "extra": 2}, extra="allow"
+    )
+    assert ignored.value == allowed.value == 1
+    assert allowed.__pydantic_extra__ == {"extra": 2}
 
 
 def test_alias_and_canonical_name_are_both_valid_input_forms() -> None:
@@ -119,11 +132,8 @@ def test_global_model_config_mutator_is_not_public_api() -> None:
     assert not hasattr(C, "set_model_config_defaults")
 
 
-@pytest.mark.parametrize(
-    "name",
-    ["_nshconfig_state", "_nshconfig_origin_path", "_nshconfig_canonical_path"],
-)
-def test_lifecycle_private_attribute_names_are_reserved(name: str) -> None:
+def test_lifecycle_private_attribute_name_is_reserved() -> None:
+    name = "_nshconfig_state"
     with pytest.raises(TypeError, match=f"reserved private attribute.*{name}"):
         type(
             "Invalid",
@@ -186,6 +196,14 @@ def test_lifecycle_methods_cannot_be_overridden() -> None:
             def __get_pydantic_core_schema__(cls, source: Any, handler: Any) -> Any:
                 return handler(source)
 
+    with pytest.raises(TypeError, match="reserved Config lifecycle method '__hash__'"):
+
+        class InvalidHash(C.Config):
+            value: int
+
+            def __hash__(self) -> int:
+                return 1
+
 
 def test_lifecycle_settings_are_rechecked_when_a_schema_is_rebuilt() -> None:
     class Rebuilt(C.Config):
@@ -217,20 +235,27 @@ def test_named_aliases_cannot_hide_validation_bypass_metadata() -> None:
             value: unsafe  # type: ignore[valid-type]
 
 
-def test_direct_config_fields_must_not_construct_rootless_defaults() -> None:
+def test_direct_config_fields_support_normal_finals_and_factories() -> None:
     class Child(C.Config):
         value: int = 1
 
-    with pytest.raises(TypeError, match="direct Config field a concrete default"):
-
-        class InvalidFactory(C.Config):
-            child: Child = Field(default_factory=Child)
+    class Factory(C.Config):
+        child: Child = Field(default_factory=Child)
 
     default_child = Child()
-    with pytest.raises(TypeError, match="direct Config field a concrete default"):
 
-        class InvalidValue(C.Config):
-            child: Child = default_child
+    class Value(C.Config):
+        child: Child = default_child
+
+    assert Factory().child == Child()
+    assert Value().child == Child()
+    assert C.is_draft(Factory.config_draft().child)
+    assert C.is_draft(Value.config_draft().child)
+
+    with pytest.raises(TypeError, match="without an intact constructor recipe"):
+
+        class InvalidMapping(C.Config):
+            child: Child = {"value": 2}  # type: ignore[assignment]
 
 
 def test_callable_discriminators_are_rejected_for_incomplete_draft_semantics() -> None:
@@ -254,8 +279,28 @@ def test_callable_discriminators_are_rejected_for_incomplete_draft_semantics() -
         class Invalid(C.Config):
             value: branch  # type: ignore[valid-type]
 
+    NamedBranch = TypeAliasType("NamedBranch", branch)
+    with pytest.raises(TypeError, match="callable union discriminator"):
 
-def test_runtime_policy_mutation_cannot_bypass_frozen_or_extra_invariants() -> None:
+        class InvalidNamed(C.Config):
+            value: NamedBranch
+
+    branch_type = TypeVar("branch_type")
+    GenericBranch = TypeAliasType(
+        "GenericBranch",
+        Annotated[branch_type, Discriminator(choose)],
+        type_params=(branch_type,),
+    )
+    tagged_union = Annotated[First, Tag("first")] | Annotated[Second, Tag("second")]
+    with pytest.raises(TypeError, match="callable union discriminator"):
+
+        class InvalidParameterized(C.Config):
+            value: GenericBranch[tagged_union]
+
+
+def test_runtime_validation_overrides_follow_pydantic_while_fields_stay_frozen() -> (
+    None
+):
     class Value(C.Config):
         number: int
 
@@ -266,12 +311,11 @@ def test_runtime_policy_mutation_cannot_bypass_frozen_or_extra_invariants() -> N
     assert frozen.value.errors()[0]["type"] == "frozen_instance"
 
     Value.model_config["extra"] = "allow"
-    with pytest.raises(ValidationError) as extra:
-        Value.model_validate({"number": 1, "surprise": 2}, extra="allow")
-    assert extra.value.errors()[0]["type"] == "nshconfig_extra_final"
+    allowed = Value.model_validate({"number": 1, "surprise": 2}, extra="allow")
+    assert allowed.__pydantic_extra__ == {"surprise": 2}
 
 
-def test_model_hooks_cannot_inject_undeclared_or_corrupt_metadata() -> None:
+def test_model_hooks_are_trusted_pydantic_code() -> None:
     class Undeclared(C.Config):
         value: int = 1
 
@@ -280,9 +324,8 @@ def test_model_hooks_cannot_inject_undeclared_or_corrupt_metadata() -> None:
             object.__setattr__(self, "cache", 2)
             return self
 
-    with pytest.raises(ValidationError) as undeclared:
-        Undeclared()
-    assert undeclared.value.errors()[0]["type"] == "nshconfig_undeclared_state"
+    undeclared = Undeclared()
+    assert undeclared.cache == 2
 
     class Extra(C.Config):
         value: int = 1
@@ -292,9 +335,8 @@ def test_model_hooks_cannot_inject_undeclared_or_corrupt_metadata() -> None:
             object.__setattr__(self, "__pydantic_extra__", {"surprise": 2})
             return self
 
-    with pytest.raises(ValidationError) as extra:
-        Extra()
-    assert extra.value.errors()[0]["type"] == "nshconfig_extra_state"
+    extra = Extra()
+    assert extra.__pydantic_extra__ == {"surprise": 2}
 
     class Metadata(C.Config):
         value: int = 1
@@ -304,33 +346,27 @@ def test_model_hooks_cannot_inject_undeclared_or_corrupt_metadata() -> None:
             object.__setattr__(self, "__pydantic_fields_set__", {"unknown"})
             return self
 
-    with pytest.raises(ValidationError) as metadata:
-        Metadata()
-    assert metadata.value.errors()[0]["type"] == "nshconfig_invalid_metadata"
+    metadata = Metadata()
+    assert metadata.__pydantic_fields_set__ == {"unknown"}
 
 
-def test_validator_modes_cannot_bypass_or_repeat_the_native_pipeline() -> None:
-    with pytest.raises(TypeError, match="wrap model validator"):
+def test_model_hooks_may_mutate_opaque_values() -> None:
+    class Choice(Enum):
+        item = []
 
-        class ModelWrap(C.Config):
-            value: int
+    class Mutating(C.Config):
+        choice: Choice = Choice.item
 
-            @model_validator(mode="wrap")
-            @classmethod
-            def _twice(cls, value: Any, handler: Any) -> Any:
-                handler(value)
-                return handler(value)
+        @model_validator(mode="after")
+        def _mutate_enum(self) -> "Mutating":
+            self.choice.value.append(1)
+            return self
 
-    for mode in ("plain", "wrap"):
-        with pytest.raises(TypeError, match=f"{mode} field validator"):
-
-            class FieldBypass(C.Config):
-                value: int
-
-                @field_validator("value", mode=mode)  # type: ignore[arg-type]
-                @classmethod
-                def _bypass(cls, value: Any, *args: Any) -> Any:
-                    return value
+    try:
+        final = Mutating()
+        assert final.choice.value == [1]
+    finally:
+        Choice.item.value.clear()
 
 
 def test_model_construct_is_rejected_for_config_classes() -> None:
@@ -404,13 +440,12 @@ def test_singleton_and_multi_value_literals_are_interpolation_targets() -> None:
     direct = Device(source="cuda")
     assert (direct.copied, direct.singleton) == ("cuda", "only")
     assert direct.__pydantic_fields_set__ == {"source"}
-    assert C.provenance(direct)["copied"][-1].kind == "interpolate"
 
-    work = C.draft(Device)
+    work = Device.config_draft()
     work.source = "cpu"
     work.copied = C.interp(lambda context: context.current().source)
     work.singleton = C.interp(lambda context: "only")
-    final = C.finalize(work)
+    final = work.config_finalize()
     assert (final.copied, final.singleton) == ("cpu", "only")
 
     with pytest.raises(ValidationError) as caught:
@@ -497,7 +532,7 @@ def test_literal_schema_remains_transparent_to_multi_tag_discriminators() -> Non
     assert caught.value.errors()[0]["type"] == "nshconfig_discriminator_interpolation"
 
 
-def test_opaque_private_slots_and_failing_key_repr_are_checked_safely() -> None:
+def test_opaque_private_slots_are_opaque_and_failing_key_repr_is_safe() -> None:
     class PrivateToken:
         __slots__ = ("__value",)
 
@@ -515,9 +550,7 @@ def test_opaque_private_slots_and_failing_key_repr_are_checked_safely() -> None:
             self.token.mutate()
             return self
 
-    with pytest.raises(ValidationError) as mutation:
-        MutatesPrivateSlot(token=PrivateToken())
-    assert mutation.value.errors()[0]["type"] == "nshconfig_model_mutation"
+    MutatesPrivateSlot(token=PrivateToken())
 
     class FailingRepr:
         def __repr__(self) -> str:
@@ -530,14 +563,4 @@ def test_opaque_private_slots_and_failing_key_repr_are_checked_safely() -> None:
         HiddenMarker(values={FailingRepr(): C.interp(lambda context: 1)})
     error = pending.value.errors()[0]
     assert error["type"] == "nshconfig_pending"
-    assert "repr unavailable" in error["ctx"]["path"]
-
-
-def test_fields_cannot_shadow_reserved_lifecycle_apis() -> None:
-    with pytest.warns(UserWarning, match="Field name.*model_dump.*shadows"):
-        with pytest.raises(
-            TypeError, match="model_dump.*reserved Config lifecycle API"
-        ):
-
-            class Bad(C.Config, protected_namespaces=()):
-                model_dump: int
+    assert error["ctx"]["path"].startswith("HiddenMarker.values[<")

@@ -1,8 +1,9 @@
 # nshconfig
 
-`nshconfig` is a small lifecycle layer over Pydantic for Python-first ML
-configuration. Pydantic defines and validates the schema. `nshconfig` adds mutable
-incomplete drafts, Python interpolation, provenance, and verified run records.
+`nshconfig` is a small lifecycle layer over Pydantic for typed, Python-first ML
+configuration. Pydantic defines and validates the schema, and nshconfig
+re-exports its authoring API for a single import. `nshconfig` adds explicit
+mutable drafts and declaration-ordered Python interpolation.
 
 ```python
 import nshconfig as C
@@ -17,23 +18,19 @@ class Run(C.Config):
     epochs: int
 
 
-work = C.draft(Run)
+work = Run.config_draft()
 work.optimizer.learning_rate = 1e-4
 work.epochs = 100
-run = C.finalize(work)
+run = work.config_finalize()
 ```
 
-The four states are deliberately distinct:
+Calling `Run(...)` directly remains ordinary validated Pydantic construction.
+Drafts are explicit, mutable, and may be incomplete. Finalization returns a fresh,
+field-frozen Pydantic model without consuming the draft.
 
-1. A `Config` class declares a Pydantic schema.
-2. A draft is mutable Python composition state and may be incomplete.
-3. A final is the validated result of one explicit interpolation boundary.
-4. A run record is inert JSON data describing the concrete final.
-
-There is no configuration language, registry, loader, or code-generation layer.
-The [semantic contract](contract.md) is the authority for lifecycle, ordering,
-value-graph, and reproducibility behavior. The [API reference](api.md) lists the
-complete exported surface and exact signatures.
+There is no configuration language, registry, loader, provenance subsystem,
+record format, or code-generation layer. The [semantic design](contract.md) is the
+authority for lifecycle, ordering, and structural graph behavior.
 
 ```{toctree}
 :maxdepth: 2
@@ -41,12 +38,9 @@ complete exported surface and exact signatures.
 installation
 quickstart
 contract
-api
-changelog
 guides/drafts
 guides/interpolation
-guides/provenance
-guides/records
+guides/project-layout
 guides/transport
 guides/failures
 guides/typing

@@ -1,8 +1,9 @@
 """Golden typing probe: this file must remain clean under basedpyright."""
 
+from __future__ import annotations
+
 from typing import Annotated
 
-from pydantic import ConfigDict, Field, ValidationInfo, field_validator
 from typing_extensions import assert_type
 
 import nshconfig as C
@@ -24,13 +25,13 @@ class Run(C.Config):
 
 
 class ProjectConfig(C.Config):
-    model_config = ConfigDict(strict=False)
+    model_config = C.ConfigDict(strict=False)
 
-    count: Annotated[int, Field(gt=0)]
+    count: Annotated[int, C.Field(gt=0)]
 
-    @field_validator("count")
+    @C.field_validator("count")
     @classmethod
-    def validate_count(cls, value: int, info: ValidationInfo) -> int:
+    def validate_count(cls, value: int, info: C.ValidationInfo) -> int:
         assert info.field_name == "count"
         return value
 
@@ -45,16 +46,13 @@ def compose(work: Model) -> None:
     work.norm.dim = C.interp(lambda context: context.root().dynamic.path)
 
 
-work = C.draft(Model)
+work = Model.config_draft()
 assert_type(work, Model)
 compose(work)
-final = C.finalize(work)
+final = work.config_finalize()
 assert_type(final, Model)
 value: int = final.norm.dim
-explanation: C.Explanation = C.explain(final, "norm.dim")
-table: dict[str, tuple[C.Event, ...]] = C.provenance(final)
 draft_flag: bool = C.is_draft(work)
-with C.source("sweep:model-dim"):
-    work.dim = 2048
+work.dim = 2048
 relaxed = ProjectConfig(count=2)
 positive: int = relaxed.count

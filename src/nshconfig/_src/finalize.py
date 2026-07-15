@@ -1,89 +1,233 @@
 """The non-destructive draft-to-final interpolation and validation boundary."""
 
 from collections.abc import Mapping, Sequence, Set as AbstractSet
-from dataclasses import is_dataclass
 from types import UnionType
 from typing import Any, Literal, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel
+from pydantic.aliases import AliasChoices, AliasPath
 from pydantic_core import PydanticUndefined
 from typing_extensions import NotRequired, ReadOnly, Required, is_typeddict
 
 from .annotations import unwrap_annotation as _unwrap_annotated
 from .config import Config
-from .draft import (
-    _DraftDict,
-    _DraftList,
-    _DraftSet,
-    assert_tracked_integrity,
-    has_user_input,
-)
+from .draft import field_was_edited
 from .errors import DraftError
 from .interp import Interp
-from .provenance import (
-    final_reuse_error,
-    merge_draft_provenance,
-    safe_repr,
-    stored_path,
-)
-from .semantic import inert_dataclass_state
-from .state import FinalState, draft_state, is_draft, state_of
+from .state import copy_builtin_graph, draft_state, is_draft, valid_recipe
 
 __all__ = ["finalize"]
 
 C = TypeVar("C", bound=Config)
+_DELETE_PATH = object()
 
 
 def finalize(config: C) -> C:
-    """Resolve and validate a draft, or revalidate an existing final by value."""
+    """Resolve interpolation and validate one draft without consuming it."""
     if not isinstance(config, Config):
-        raise TypeError("finalize() expects a Config instance")
-    if is_draft(config):
-        values = _collect_draft(config, type(config).__name__, set())
-        output = type(config).model_validate(values, by_alias=True, by_name=True)
-        merge_draft_provenance(config, output)
-        return output
-
-    if not isinstance(state_of(config), FinalState):
+        raise TypeError("config_finalize() expects a Config instance")
+    if not is_draft(config):
         raise DraftError(
-            "finalize() cannot run while Config validation is still in progress"
+            "config_finalize() expects a draft; this Config is already final. Keep and edit the "
+            "original draft when values must change"
         )
-    return type(config).model_validate(config, by_alias=True, by_name=True)
+    values = _collect_draft(config, type(config).__name__, set(), {})
+    output = type(config).model_validate(values, by_alias=True, by_name=True)
+    return output
 
 
-def _collect_draft(config: Config, path: str, active: set[int]) -> dict[str, Any]:
+def default_input(
+    value: Any,
+    annotation: Any,
+    path: str,
+    active: set[int] | None = None,
+    memo: dict[int, Any] | None = None,
+    *,
+    discriminator: Any = None,
+) -> Any:
+    """Turn a default-origin Config graph into replayable validation input."""
+
+    if active is None:
+        active = set()
+    if memo is None:
+        memo = {}
+    if isinstance(value, Interp):
+        return value
+
+    is_container = type(value) in {dict, list, tuple, set, frozenset}
+    identity = id(value)
+    if is_container:
+        _enter(identity, path, active)
+    try:
+        selected, discriminator = _select_annotation(
+            value, annotation, path, discriminator=discriminator
+        )
+        if isinstance(value, Config):
+            return _config_default_input(
+                value,
+                selected,
+                discriminator,
+                path,
+                active,
+                memo,
+            )
+        if type(value) is dict:
+            _, item_annotation = _mapping_annotations(selected)
+            preserve_alias = not _contains_config_in_builtins(value, set())
+            if identity in memo and preserve_alias:
+                return memo[identity]
+            output: dict[Any, Any] = {}
+            if preserve_alias:
+                memo[identity] = output
+            for key, item in value.items():
+                copied_key = copy_builtin_graph(key, memo)
+                copied_item = default_input(
+                    item,
+                    _mapping_value_annotation(selected, key, item_annotation),
+                    f"{path}[{_safe_repr(key, limit=80)}]",
+                    active,
+                    memo,
+                )
+                output[copied_key] = copied_item
+            return output
+        if type(value) is list:
+            annotations = _sequence_annotations(selected, len(value))
+            preserve_alias = not _contains_config_in_builtins(value, set())
+            if identity in memo and preserve_alias:
+                return memo[identity]
+            output_list: list[Any] = []
+            if preserve_alias:
+                memo[identity] = output_list
+            output_list.extend(
+                default_input(
+                    item,
+                    annotations[index],
+                    f"{path}[{index}]",
+                    active,
+                    memo,
+                )
+                for index, item in enumerate(value)
+            )
+            return output_list
+        if type(value) is tuple:
+            annotations = _sequence_annotations(selected, len(value))
+            preserve_alias = not _contains_config_in_builtins(value, set())
+            if identity in memo and preserve_alias:
+                return memo[identity]
+            output_tuple = tuple(
+                default_input(
+                    item,
+                    annotations[index],
+                    f"{path}[{index}]",
+                    active,
+                    memo,
+                )
+                for index, item in enumerate(value)
+            )
+            if preserve_alias:
+                memo[identity] = output_tuple
+            return output_tuple
+        if type(value) in {set, frozenset}:
+            return copy_builtin_graph(value, memo)
+        return value
+    finally:
+        if is_container:
+            active.remove(identity)
+
+
+def _config_default_input(
+    value: Config,
+    selected: Any,
+    discriminator: Any,
+    path: str,
+    active: set[int],
+    memo: dict[int, Any],
+) -> Config:
+    if _concrete_config_type(selected) is not type(value):
+        raise ValueError(
+            f"{path} contains a Config default but its annotation does not "
+            "describe that Config structure: this position must name the exact "
+            f"{type(value).__name__} type"
+        )
+    if is_draft(value):
+        values = _collect_draft(value, path, set())
+        return _validation_carrier(value, values, discriminator)
+
+    recipe = valid_recipe(value)
+    if recipe is None:
+        raise ValueError(
+            f"{path} uses a Config default without an intact constructor recipe"
+        )
+    inputs = copy_builtin_graph(recipe.inputs)
+    assert isinstance(inputs, dict)
+    for name, model_field in type(value).__pydantic_fields__.items():
+        current = _field_value(inputs, type(value), name)
+        if current is PydanticUndefined:
+            continue
+        replacement = default_input(
+            current,
+            model_field.annotation,
+            f"{path}.{name}",
+            active,
+            memo,
+            discriminator=model_field.discriminator,
+        )
+        _replace_field_input(inputs, type(value), name, replacement)
+    return _validation_carrier(
+        value,
+        inputs,
+        discriminator,
+        replay_recipe=True,
+    )
+
+
+def _collect_draft(
+    config: Config,
+    path: str,
+    active: set[int],
+    memo: dict[int, Any] | None = None,
+) -> dict[str, Any]:
+    if memo is None:
+        memo = {}
     identity = id(config)
     _enter(identity, path, active)
     try:
-        output: dict[str, Any] = {}
+        state = draft_state(config)
+        output = copy_builtin_graph(state.base.inputs) if state.base is not None else {}
+        assert isinstance(output, dict)
         data = object.__getattribute__(config, "__dict__")
-        for name, value in data.items():
-            if name in type(config).__pydantic_fields__:
-                assert_tracked_integrity(value, f"{path}.{name}")
         explicit = config.__pydantic_fields_set__
-        pending = draft_state(config).pending
+        pending = state.pending
         for name, model_field in type(config).__pydantic_fields__.items():
             field_path = f"{path}.{name}"
-            if name in pending:
-                output[name] = pending[name]
+            if name in state.deleted:
+                _remove_field_input(output, type(config), name)
                 continue
-            if name in data and (name in explicit or has_user_input(data[name])):
-                output[name] = _collect_value(
+            if name in pending:
+                _replace_field_input(output, type(config), name, pending[name])
+                continue
+            if name in data and (
+                name in explicit or field_was_edited(config, name, data[name])
+            ):
+                replacement = _collect_value(
                     data[name],
                     model_field.annotation,
                     field_path,
                     active,
+                    memo,
                     allow_interp=True,
                     discriminator=model_field.discriminator,
                 )
+                _replace_field_input(output, type(config), name, replacement)
                 continue
             if (
-                model_field.is_required()
+                not _field_provided(output, type(config), name)
+                and model_field.is_required()
                 and (child_type := _concrete_config_type(model_field.annotation))
                 is not None
             ):
                 if name in data and is_draft(data[name]):
-                    output[name] = _collect_draft(data[name], field_path, active)
+                    output[name] = _collect_draft(data[name], field_path, active, memo)
                 else:
                     output[name] = _required_spine(child_type, field_path, set())
         return output
@@ -95,8 +239,7 @@ def _collect_final(
     config: Config,
     path: str,
     active: set[int],
-    *,
-    allow_historical_finals: bool = False,
+    memo: dict[int, Any],
 ) -> dict[str, Any]:
     identity = id(config)
     _enter(identity, path, active)
@@ -108,9 +251,9 @@ def _collect_final(
                 model_field.annotation,
                 f"{path}.{name}",
                 active,
+                memo,
                 allow_interp=False,
                 discriminator=model_field.discriminator,
-                allow_historical_finals=allow_historical_finals,
             )
             for name, model_field in type(config).__pydantic_fields__.items()
             if name in data
@@ -124,10 +267,10 @@ def _collect_value(
     annotation: Any,
     path: str,
     active: set[int],
+    memo: dict[int, Any],
     *,
     allow_interp: bool,
     discriminator: Any = None,
-    allow_historical_finals: bool = False,
 ) -> Any:
     if isinstance(value, Interp):
         if allow_interp:
@@ -148,133 +291,144 @@ def _collect_value(
                 f"{type(value).__name__} type"
             )
         values = (
-            _collect_draft(value, path, active)
+            _collect_draft(value, path, active, memo)
             if is_draft(value)
-            else _collect_final(
-                value,
-                path,
-                active,
-                allow_historical_finals=allow_historical_finals,
-            )
+            else _collect_final(value, path, active, memo)
         )
-        return _validation_carrier(
-            value,
-            values,
-            discriminator,
-            path,
-            allow_historical=allow_historical_finals,
-        )
+        return _validation_carrier(value, values, discriminator)
 
     identity = id(value)
-    if type(value) is dict or isinstance(value, _DraftDict):
+    if type(value) is dict:
         key_annotation, item_annotation = _mapping_annotations(annotation)
-        for key, item in value.items():
-            if type(key) not in {str, int} and _contains_config(item, set()):
-                raise ValueError(
-                    f"{path} uses unsupported structural mapping key "
-                    f"{safe_repr(key, limit=80)}: mappings containing Config values "
-                    "require exact str or int keys"
-                )
+        preserve_alias = not _contains_config_in_builtins(value, set())
         _enter(identity, path, active)
         try:
-            return {
-                _collect_value(
+            if identity in memo and preserve_alias:
+                return memo[identity]
+            output: dict[Any, Any] = {}
+            if preserve_alias:
+                memo[identity] = output
+            for key, item in value.items():
+                collected_key = _collect_value(
                     key,
                     key_annotation,
                     f"{path}.<key>",
                     active,
+                    memo,
                     allow_interp=False,
-                    allow_historical_finals=allow_historical_finals,
-                ): _collect_value(
+                )
+                collected_item = _collect_value(
                     item,
                     _mapping_value_annotation(annotation, key, item_annotation),
-                    f"{path}[{safe_repr(key, limit=80)}]",
+                    f"{path}[{_safe_repr(key, limit=80)}]",
                     active,
+                    memo,
                     allow_interp=False,
-                    allow_historical_finals=allow_historical_finals,
                 )
-                for key, item in value.items()
-            }
+                output[collected_key] = collected_item
+            return output
         finally:
             active.remove(identity)
-    if type(value) is list or isinstance(value, _DraftList):
+    if type(value) is list:
         item_annotations = _sequence_annotations(annotation, len(value))
+        preserve_alias = not _contains_config_in_builtins(value, set())
         _enter(identity, path, active)
         try:
-            return [
+            if identity in memo and preserve_alias:
+                return memo[identity]
+            output_list: list[Any] = []
+            if preserve_alias:
+                memo[identity] = output_list
+            output_list.extend(
                 _collect_value(
                     item,
                     item_annotations[index],
                     f"{path}[{index}]",
                     active,
+                    memo,
                     allow_interp=False,
-                    allow_historical_finals=allow_historical_finals,
                 )
                 for index, item in enumerate(value)
-            ]
+            )
+            return output_list
         finally:
             active.remove(identity)
     if type(value) is tuple:
         item_annotations = _sequence_annotations(annotation, len(value))
+        preserve_alias = not _contains_config_in_builtins(value, set())
         _enter(identity, path, active)
         try:
-            return tuple(
+            if identity in memo and preserve_alias:
+                return memo[identity]
+            output_tuple = tuple(
                 _collect_value(
                     item,
                     item_annotations[index],
                     f"{path}[{index}]",
                     active,
+                    memo,
                     allow_interp=False,
-                    allow_historical_finals=allow_historical_finals,
                 )
                 for index, item in enumerate(value)
             )
+            if preserve_alias:
+                memo[identity] = output_tuple
+            return output_tuple
         finally:
             active.remove(identity)
-    if type(value) is set or isinstance(value, _DraftSet):
+    if type(value) is set:
         item_annotation = _set_annotation(annotation)
+        preserve_alias = not _contains_config_in_builtins(value, set())
         _enter(identity, path, active)
         try:
-            return {
+            if identity in memo and preserve_alias:
+                return memo[identity]
+            output_set: set[Any] = set()
+            if preserve_alias:
+                memo[identity] = output_set
+            output_set.update(
                 _collect_value(
                     item,
                     item_annotation,
                     f"{path}[{index}]",
                     active,
+                    memo,
                     allow_interp=False,
-                    allow_historical_finals=allow_historical_finals,
                 )
                 for index, item in enumerate(value)
-            }
+            )
+            return output_set
         finally:
             active.remove(identity)
     if type(value) is frozenset:
         item_annotation = _set_annotation(annotation)
+        preserve_alias = not _contains_config_in_builtins(value, set())
         _enter(identity, path, active)
         try:
-            return frozenset(
+            if identity in memo and preserve_alias:
+                return memo[identity]
+            output_frozen = frozenset(
                 _collect_value(
                     item,
                     item_annotation,
                     f"{path}[{index}]",
                     active,
+                    memo,
                     allow_interp=False,
-                    allow_historical_finals=allow_historical_finals,
                 )
                 for index, item in enumerate(value)
             )
+            if preserve_alias:
+                memo[identity] = output_frozen
+            return output_frozen
         finally:
             active.remove(identity)
-    if isinstance(value, BaseModel):
-        _assert_opaque_model_clean(value, path, active)
-    elif is_dataclass(value) and not isinstance(value, type):
-        _assert_dataclass_clean(value, path, active)
     return value
 
 
 def _required_spine(
     cls: type[Config], path: str, active_classes: set[type[Config]]
-) -> Config:
+) -> dict[str, Any]:
     if cls in active_classes:
         raise ValueError(
             f"required Config fields form an unbounded recursive spine at {path}"
@@ -291,11 +445,7 @@ def _required_spine(
                 output[name] = _required_spine(
                     child_type, f"{path}.{name}", active_classes
                 )
-        # These values only make the required Config structure available to
-        # Pydantic.  They are not user input, so preserve that distinction at
-        # every generated node instead of passing a mapping whose keys would be
-        # recorded in ``model_fields_set``.
-        return _detached_validation_carrier(cls, output, set())
+        return output
     finally:
         active_classes.remove(cls)
 
@@ -362,7 +512,7 @@ def _annotation_accepts_structure(
             for argument in get_args(annotation)
         )
     if annotation in {Any, object}:
-        return not _contains_config(value, set())
+        return not _contains_config_in_builtins(value, set())
     if isinstance(value, Config):
         return _concrete_config_type(annotation) is type(value)
     if isinstance(value, Interp):
@@ -551,123 +701,236 @@ def _contains_config(value: Any, active: set[int]) -> bool:
     return False
 
 
+def _contains_config_in_builtins(value: Any, active: set[int]) -> bool:
+    """Inspect only the exact built-in graph; arbitrary objects stay opaque."""
+
+    if isinstance(value, Config):
+        return True
+    if type(value) not in {dict, list, tuple, set, frozenset}:
+        return False
+    identity = id(value)
+    if identity in active:
+        return False
+    active.add(identity)
+    try:
+        items = (
+            value.items() if type(value) is dict else ((None, item) for item in value)
+        )
+        return any(
+            (key is not None and _contains_config_in_builtins(key, active))
+            or _contains_config_in_builtins(item, active)
+            for key, item in items
+        )
+    finally:
+        active.remove(identity)
+
+
 def _validation_carrier(
     source: Config,
     values: dict[str, Any],
     discriminator: Any,
-    path: str,
     *,
-    allow_historical: bool,
+    replay_recipe: bool = False,
 ) -> Config:
-    if (
-        not allow_historical
-        and not is_draft(source)
-        and (reason := final_reuse_error(source)) is not None
-    ):
-        raise ValueError(
-            f"{path} cannot reuse a provenance-bearing Config final: {reason}"
-        )
-    # Preserve the actual source for ordinary final reuse.  Pydantic's required
-    # ``revalidate_instances='always'`` creates the new validated node, while
-    # the validation scope can still identify and transfer its provenance.
-    # ``finalize(existing_final)`` uses detached carriers because the root-level
-    # provenance copy handles the entire historical graph in one pass.
-    if not is_draft(source) and not allow_historical:
+    if not replay_recipe and not is_draft(source):
         return source
+    assert not (replay_recipe and is_draft(source)), (
+        "only a final Config can replay a constructor recipe"
+    )
     values = dict(values)
     injected: set[str] = set()
-    if isinstance(discriminator, str) and discriminator not in values:
+    if (
+        isinstance(discriminator, str)
+        and _field_value(values, type(source), discriminator) is PydanticUndefined
+    ):
         model_field = type(source).__pydantic_fields__.get(discriminator)
         if model_field is not None:
-            default = model_field.get_default(call_default_factory=False)
-            if default is not PydanticUndefined and not isinstance(default, Interp):
-                values[discriminator] = default
+            if replay_recipe:
+                data = object.__getattribute__(source, "__dict__")
+                tag = data.get(discriminator, PydanticUndefined)
+            else:
+                tag = model_field.get_default(call_default_factory=False)
+            if tag is not PydanticUndefined and not isinstance(tag, Interp):
+                values[discriminator] = tag
                 injected.add(discriminator)
 
-    return _detached_validation_carrier(
-        type(source),
-        values,
-        (source.__pydantic_fields_set__ & values.keys()) - injected,
-    )
-
-
-def _detached_validation_carrier(
-    cls: type[Config], values: dict[str, Any], fields_set: set[str]
-) -> Config:
-    carrier = object.__new__(cls)
+    carrier = object.__new__(type(source))
     object.__setattr__(carrier, "__dict__", values)
-    object.__setattr__(carrier, "__pydantic_fields_set__", fields_set)
+    object.__setattr__(
+        carrier,
+        "__pydantic_fields_set__",
+        set(source.__pydantic_fields_set__) - injected,
+    )
     object.__setattr__(carrier, "__pydantic_extra__", None)
     object.__setattr__(carrier, "__pydantic_private__", {})
     return carrier
+
+
+def _field_paths(cls: type[BaseModel], name: str) -> tuple[tuple[Any, ...], ...]:
+    model_field = cls.__pydantic_fields__[name]
+    alias = model_field.validation_alias
+    choices = alias.choices if isinstance(alias, AliasChoices) else [alias]
+    paths: list[tuple[Any, ...]] = []
+    for choice in choices:
+        if isinstance(choice, str):
+            paths.append((choice,))
+        elif isinstance(choice, AliasPath):
+            paths.append(tuple(choice.path))
+    paths.append((name,))
+    return tuple(dict.fromkeys(paths))
+
+
+def _field_value(values: Mapping[str, Any], cls: type[BaseModel], name: str) -> Any:
+    for path in _field_paths(cls, name):
+        current = _value_at_path(values, path)
+        if current is not PydanticUndefined:
+            return current
+    return PydanticUndefined
+
+
+def _field_provided(values: Mapping[str, Any], cls: type[BaseModel], name: str) -> bool:
+    return _field_value(values, cls, name) is not PydanticUndefined
+
+
+def _remove_field_input(
+    values: dict[str, Any], cls: type[BaseModel], name: str
+) -> None:
+    for path in _field_paths(cls, name):
+        if len(path) > 1 and not _another_field_uses_alias_root(
+            values, cls, name, path[0]
+        ):
+            _delete_path(values, path[:1])
+        else:
+            _delete_path(values, path)
+
+
+def _another_field_uses_alias_root(
+    values: Mapping[str, Any],
+    cls: type[BaseModel],
+    excluded_name: str,
+    root: Any,
+) -> bool:
+    return any(
+        path
+        and path[0] == root
+        and _value_at_path(values, path) is not PydanticUndefined
+        for name in cls.__pydantic_fields__
+        if name != excluded_name
+        for path in _field_paths(cls, name)
+    )
+
+
+def _value_at_path(values: Any, path: tuple[Any, ...]) -> Any:
+    current = values
+    for part in path:
+        if isinstance(current, str):
+            return PydanticUndefined
+        try:
+            current = current[part]
+        except (KeyError, IndexError, TypeError):
+            return PydanticUndefined
+    return current
+
+
+def _delete_path(values: Any, path: tuple[Any, ...]) -> None:
+    if not path:
+        return
+    updated, found = _rewrite_path(values, path, _DELETE_PATH)
+    if found:
+        assert isinstance(values, dict) and isinstance(updated, dict)
+        values.clear()
+        values.update(updated)
+
+
+def _replace_field_input(
+    values: dict[str, Any], cls: type[BaseModel], name: str, replacement: Any
+) -> None:
+    for path in _field_paths(cls, name):
+        updated, found = _rewrite_path(values, path, replacement)
+        if found:
+            assert isinstance(updated, dict)
+            values.clear()
+            values.update(updated)
+            return
+    values[name] = replacement
+
+
+def _rewrite_path(
+    value: Any,
+    path: tuple[Any, ...],
+    replacement: Any,
+) -> tuple[Any, bool]:
+    """Functionally replace or delete one mapping/list/tuple path."""
+
+    part, *remaining = path
+    child, found = _path_item(value, part)
+    if not found:
+        return value, False
+
+    if remaining:
+        updated_child, found = _rewrite_path(child, tuple(remaining), replacement)
+        if not found:
+            return value, False
+        delete_child = replacement is _DELETE_PATH and _empty_alias_branch(
+            updated_child
+        )
+        return _write_path_item(
+            value,
+            part,
+            _DELETE_PATH if delete_child else updated_child,
+        )
+    return _write_path_item(value, part, replacement)
+
+
+def _path_item(value: Any, part: Any) -> tuple[Any, bool]:
+    if isinstance(value, Mapping):
+        try:
+            return value[part], True
+        except (IndexError, KeyError, TypeError):
+            return None, False
+    if isinstance(value, (list, tuple)) and isinstance(part, int):
+        if -len(value) <= part < len(value):
+            return value[part], True
+    return None, False
+
+
+def _write_path_item(value: Any, part: Any, replacement: Any) -> tuple[Any, bool]:
+    if isinstance(value, Mapping):
+        output = dict(value)
+        if replacement is _DELETE_PATH:
+            output.pop(part, None)
+        else:
+            output[part] = replacement
+        return output, True
+    if isinstance(value, (list, tuple)) and isinstance(part, int):
+        if not -len(value) <= part < len(value):
+            return value, False
+        output_items = list(value)
+        output_items[part] = (
+            PydanticUndefined if replacement is _DELETE_PATH else replacement
+        )
+        output = output_items if isinstance(value, list) else tuple(output_items)
+        return output, True
+    return value, False
+
+
+def _empty_alias_branch(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return not value
+    if isinstance(value, (list, tuple)):
+        return not value or all(item is PydanticUndefined for item in value)
+    return False
+
+
+def _safe_repr(value: Any, *, limit: int) -> str:
+    try:
+        rendered = repr(value)
+    except Exception:
+        rendered = f"<{type(value).__name__}>"
+    return rendered if len(rendered) <= limit else f"{rendered[: limit - 3]}..."
 
 
 def _enter(identity: int, path: str, active: set[int]) -> None:
     if identity in active:
         raise ValueError(f"configuration values must be acyclic; cycle found at {path}")
     active.add(identity)
-
-
-def _assert_opaque_model_clean(value: BaseModel, path: str, active: set[int]) -> None:
-    identity = id(value)
-    _enter(identity, path, active)
-    try:
-        data = object.__getattribute__(value, "__dict__")
-        for name in type(value).__pydantic_fields__:
-            if name in data:
-                _assert_no_pending(data[name], f"{path}.{name}", active)
-        extra = object.__getattribute__(value, "__pydantic_extra__") or {}
-        for name, item in extra.items():
-            _assert_no_pending(
-                item,
-                f"{path}[{safe_repr(name, limit=80)}]",
-                active,
-            )
-        private = object.__getattribute__(value, "__pydantic_private__") or {}
-        for name, item in private.items():
-            _assert_no_pending(item, f"{path}.{name}", active)
-    finally:
-        active.remove(identity)
-
-
-def _assert_dataclass_clean(value: Any, path: str, active: set[int]) -> None:
-    identity = id(value)
-    _enter(identity, path, active)
-    try:
-        state = inert_dataclass_state(value)
-        for name, item in state.items():
-            _assert_no_pending(item, stored_path(path, name), active)
-    finally:
-        active.remove(identity)
-
-
-def _assert_no_pending(value: Any, path: str, active: set[int]) -> None:
-    if isinstance(value, Interp) or is_draft(value):
-        raise ValueError(
-            f"pending nshconfig value is hidden in an opaque object at {path}"
-        )
-    if isinstance(value, Mapping):
-        identity = id(value)
-        _enter(identity, path, active)
-        try:
-            for key, item in value.items():
-                _assert_no_pending(key, f"{path}.<key>", active)
-                _assert_no_pending(
-                    item,
-                    f"{path}[{safe_repr(key, limit=80)}]",
-                    active,
-                )
-        finally:
-            active.remove(identity)
-    elif isinstance(value, (list, tuple, set, frozenset)):
-        identity = id(value)
-        _enter(identity, path, active)
-        try:
-            for index, item in enumerate(value):
-                _assert_no_pending(item, f"{path}[{index}]", active)
-        finally:
-            active.remove(identity)
-    elif isinstance(value, BaseModel):
-        _assert_opaque_model_clean(value, path, active)
-    elif is_dataclass(value) and not isinstance(value, type):
-        _assert_dataclass_clean(value, path, active)

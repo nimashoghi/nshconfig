@@ -1,32 +1,44 @@
 # Installation
 
-Version 2 is currently an alpha release. Opt in to pre-releases explicitly when
-installing the core package:
+Install the core package:
 
 ```bash
-python -m pip install --pre 'nshconfig>=2.0.0a0,<3'
+pip install --pre nshconfig
 ```
 
-`nshconfig` supports Python 3.10 through 3.14; package metadata excludes Python
-3.15 until it is supported. Pydantic 2.13 through the latest Pydantic 2.x release
-is supported. The core dependencies are `pydantic` and `typing-extensions`.
+The `--pre` flag selects the current v2 prerelease instead of the older stable
+series. It will no longer be needed once v2 is released as stable.
+
+`nshconfig` supports Python 3.10 through 3.14 and Pydantic 2.13 through the
+latest Pydantic 2.x release. Its core dependencies are `pydantic` and
+`typing-extensions`.
 
 Install optional features only where they are needed:
 
 ```bash
-python -m pip install --pre 'nshconfig[treescope]>=2.0.0a0,<3'   # rich notebook rendering
-python -m pip install --pre 'nshconfig[transport]>=2.0.0a0,<3'   # cloudpickle transport
-python -m pip install --pre 'nshconfig[docs]>=2.0.0a0,<3'        # local documentation builds
+pip install --pre 'nshconfig[treescope]'   # rich notebook rendering
+pip install --pre 'nshconfig[transport]'   # cloudpickle transport
+pip install --pre 'nshconfig[all]'         # both optional features
 ```
 
-Pydantic remains the schema API. Import `Field`, `ConfigDict`, validators, and
-other Pydantic features directly:
+Pydantic remains the schema API. nshconfig re-exports its non-deprecated
+authoring surface unchanged, so application schemas need only one import:
 
 ```python
-from pydantic import ConfigDict, Field, field_validator
-
 import nshconfig as C
+
+
+class Job(C.Config):
+    model_config = C.ConfigDict(strict=False)
+    workers: int = C.Field(gt=0)
+
+    @C.field_validator("workers")
+    @classmethod
+    def check_workers(cls, value: int) -> int:
+        return value
 ```
+
+Direct imports from `pydantic` remain equivalent.
 
 [basedpyright](https://docs.basedpyright.com/) is the supported type checker. See
 the [typing guide](guides/typing.md) for the checked and runtime-only parts of the

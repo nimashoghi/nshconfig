@@ -5,5 +5,5 @@ explain common workflows; this page defines the complete lifecycle, ordering, an
 value-graph rules.
 
 ```{include} ../../DESIGN.md
-:start-after: "# nshconfig semantic contract"
+:start-after: "# nshconfig v2 semantic design"
 ```

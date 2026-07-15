@@ -7,6 +7,7 @@ import pytest
 from pydantic import (
     AliasChoices,
     AfterValidator,
+    BaseModel,
     BeforeValidator,
     Field,
     ValidationError,
@@ -27,7 +28,7 @@ def test_interpolation_markers_are_immutable_recipe_values():
         marker.site = "forged"  # type: ignore[attr-defined]
 
 
-def test_pydantic_use_default_cannot_replace_explicit_input() -> None:
+def test_pydantic_use_default_retains_native_default_control_flow() -> None:
     class Defaults(C.Config):
         value: int = 5
 
@@ -38,10 +39,7 @@ def test_pydantic_use_default_cannot_replace_explicit_input() -> None:
                 raise PydanticUseDefault()
             return value
 
-    assert Defaults().value == 5
-    with pytest.raises(ValidationError) as caught:
-        Defaults(value="default")
-    assert caught.value.errors()[0]["type"] == "nshconfig_default_substitution"
+    assert Defaults(value="default").value == 5
 
 
 def test_alias_inputs_feed_canonical_validated_values_and_explicit_targets_win():
@@ -183,7 +181,7 @@ def test_context_selectors_read_canonical_values_at_each_ancestor_level():
         root_value: int = 7
         middle: Middle
 
-    final = C.finalize(C.draft(Root))
+    final = Root.config_draft().config_finalize()
     leaf = final.middle.leaf
     assert (
         leaf.from_current,
@@ -220,29 +218,25 @@ def test_model_before_input_is_authoritative_for_interpolation_origin():
                 return {key: item for key, item in value.items() if key != "copied"}
             return value
 
-    with pytest.raises(ValidationError) as caught:
-        ModelBefore(source=4, copied=99)
-    assert caught.value.errors()[0]["type"] == "nshconfig_ignored_input"
+    final = ModelBefore(source=4, copied=99)
+    assert (final.source, final.copied) == (4, 4)
 
 
-def test_default_factory_interpolation_is_pending_on_drafts_and_records_default_origin():
+def test_default_factory_interpolation_is_pending_on_drafts():
     class FactoryDefault(C.Config):
         source: int = 4
         copied: int = Field(
             default_factory=lambda: C.interp(lambda context: context.current().source)
         )
 
-    work = C.draft(FactoryDefault)
+    work = FactoryDefault.config_draft()
     with pytest.raises(
         C.UnsetError, match="pending interpolation from its default factory"
     ):
         _ = work.copied
 
-    final = C.finalize(work)
-    event = C.provenance(final)["copied"][-1]
+    final = work.config_finalize()
     assert final.copied == 4
-    assert event.kind == "interpolate"
-    assert event.from_default is True
 
 
 def test_root_can_descend_active_direct_branches_to_earlier_validated_fields():
@@ -258,7 +252,7 @@ def test_root_can_descend_active_direct_branches_to_earlier_validated_fields():
         root_value: int = 7
         middle: Middle
 
-    assert C.finalize(C.draft(Root)).middle.leaf.copied == 3
+    assert Root.config_draft().config_finalize().middle.leaf.copied == 3
 
 
 def test_an_active_branch_view_cannot_be_returned_as_a_completed_value():
@@ -275,7 +269,7 @@ def test_an_active_branch_view_cannot_be_returned_as_a_completed_value():
     with pytest.raises(
         ValidationError, match="still being validated|not a completed value"
     ):
-        C.finalize(C.draft(WholeBranchRoot))
+        WholeBranchRoot.config_draft().config_finalize()
 
 
 def test_container_elements_do_not_expose_a_partial_container_to_root_descent():
@@ -289,13 +283,49 @@ def test_container_elements_do_not_expose_a_partial_container_to_root_descent():
     class ContainerRoot(C.Config):
         items: list[ContainerItem]
 
-    work = C.draft(ContainerRoot)
-    item = C.draft(ContainerItem)
+    work = ContainerRoot.config_draft()
+    item = ContainerItem.config_draft()
     work.items = [item]
     with pytest.raises(ValidationError) as caught:
-        C.finalize(work)
+        work.config_finalize()
     assert caught.value.errors()[0]["loc"] == ("items", 0, "leaf", "value")
     assert "items has not been validated yet" in caught.value.errors()[0]["msg"]
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda context: context.current().sequence[:][0].values.append(2),
+        lambda context: context.current().by_key[("child",)].values.append(2),
+        lambda context: (context.current().sequence + [])[0].values.append(2),
+        lambda context: (context.current().sequence * 1)[0].values.append(2),
+        lambda context: (context.current().by_key | {})[("child",)].values.append(2),
+    ],
+    ids=[
+        "slice",
+        "non-path-mapping-key",
+        "concatenation",
+        "multiplication",
+        "mapping-union",
+    ],
+)
+def test_context_container_access_cannot_mutate_canonical_config_values(
+    mutate: Any,
+) -> None:
+    class Child(C.Config):
+        values: list[int] = [1]
+
+    def derive(context: C.Context) -> int:
+        mutate(context)
+        return 1
+
+    class Root(C.Config):
+        sequence: list[Child] = [Child()]
+        by_key: dict[tuple[str, ...], Child] = {("child",): Child()}
+        derived: int = C.interp(derive)
+
+    with pytest.raises(ValidationError, match="read-only interpolation container view"):
+        Root()
 
 
 def test_completed_earlier_branches_are_visible_but_later_siblings_are_not():
@@ -309,7 +339,7 @@ def test_completed_earlier_branches_are_visible_but_later_siblings_are_not():
         source: Source
         dependent: Dependent
 
-    assert C.finalize(C.draft(Root)).dependent.copied == 8
+    assert Root.config_draft().config_finalize().dependent.copied == 8
 
     class EarlyDependent(C.Config):
         copied: int = C.interp(lambda context: context.root(WrongRoot).source.value)
@@ -319,7 +349,7 @@ def test_completed_earlier_branches_are_visible_but_later_siblings_are_not():
         source: Source
 
     with pytest.raises(ValidationError, match="source has not been validated yet"):
-        C.finalize(C.draft(WrongRoot))
+        WrongRoot.config_draft().config_finalize()
 
 
 def test_nested_validation_starts_a_fresh_root_and_restores_the_outer_context():
@@ -367,7 +397,7 @@ def test_post_init_and_model_after_hooks_observe_the_completed_interpolated_mode
 
 
 @pytest.mark.parametrize("hook", ["post_init", "model_after"])
-def test_model_level_hooks_cannot_rewrite_values_published_to_interpolation(hook: str):
+def test_model_level_hooks_follow_native_pydantic_semantics(hook: str):
     if hook == "post_init":
 
         class PostInitMutates(C.Config):
@@ -393,14 +423,11 @@ def test_model_level_hooks_cannot_rewrite_values_published_to_interpolation(hook
 
         model_type = AfterMutates
 
-    with pytest.raises(ValidationError) as caught:
-        model_type()
-
-    assert caught.value.errors()[0]["type"] == "nshconfig_model_mutation"
-    assert "model-level hooks changed source" in caught.value.errors()[0]["msg"]
+    final = model_type()
+    assert (final.source, final.copied) == (99, 1)
 
 
-def test_model_level_hooks_cannot_mutate_published_containers_in_place():
+def test_model_level_hooks_may_mutate_published_containers_in_place():
     class AfterMutates(C.Config):
         source: list[int] = [1]
         copied: int = C.interp(lambda context: context.current().source[0])
@@ -410,35 +437,42 @@ def test_model_level_hooks_cannot_mutate_published_containers_in_place():
             self.source.append(2)
             return self
 
-    with pytest.raises(ValidationError) as caught:
-        AfterMutates()
-
-    assert caught.value.errors()[0]["type"] == "nshconfig_model_mutation"
-    assert "model-level hooks changed source" in caught.value.errors()[0]["msg"]
+    final = AfterMutates()
+    assert final.source == [1, 2]
+    assert final.copied == 1
 
 
-def test_model_level_mutation_guard_preserves_opaque_values_by_identity():
+def test_interpolation_preserves_opaque_values_by_identity():
     class Token:
+        pass
+
+    class Box(BaseModel):
+        values: list[int]
+
+    class CustomDict(dict[str, int]):
         pass
 
     class Holder(C.Config, arbitrary_types_allowed=True):
         token: Token
+        box: Box
+        mapping: Any
+        copied_token: Token = C.interp(lambda context: context.current().token)
+        copied_box: Box = C.interp(lambda context: context.current().box)
+        copied_mapping: Any = C.interp(lambda context: context.current().mapping)
 
     token = Token()
-    assert Holder(token=token).token is token
+    box = Box(values=[1])
+    mapping = CustomDict(value=2)
+    final = Holder(token=token, box=box, mapping=mapping)
+    assert final.copied_token is token
+    assert final.copied_box is box
+    assert final.copied_mapping is mapping
 
 
-def test_interpolation_provenance_uses_canonical_paths_and_explain_follows_reads():
+def test_interpolation_uses_canonical_field_names_behind_aliases():
     class Aliased(C.Config):
         source: int = Field(alias="wire_source")
         copied: int = C.interp(lambda context: context.current().source)
 
     final = Aliased.model_validate({"wire_source": 6})
-    event = C.provenance(final)["copied"][-1]
-    assert event.kind == "interpolate"
-    assert event.reads == (("source", "6"),)
-
-    explanation = C.explain(final, "copied")
-    assert explanation.current == "6"
-    assert [cause.path for cause in explanation.causes] == ["source"]
-    assert explanation.causes[0].current == "6"
+    assert (final.source, final.copied) == (6, 6)

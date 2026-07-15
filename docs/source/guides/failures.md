@@ -1,88 +1,50 @@
-# Failure model
+# Failures and diagnostics
 
-`nshconfig` rejects incomplete, ambiguous, or non-reproducible results instead of
-emitting partial output. Preserve these errors at application boundaries; their
-locations explain which lifecycle rule failed.
+Let lifecycle and Pydantic errors surface at their natural boundary:
 
-The [semantic contract](../contract.md) is the authority for the invariants behind
-these errors.
+| Error | Meaning |
+| --- | --- |
+| `UnsetError` | A draft field was read before it had a usable value |
+| `DraftError` | A draft was copied or sent through Pydantic serialization, or a final was finalized again |
+| Pydantic `ValidationError` | Final input, interpolation output, or a structural Config position was invalid |
+| `TypeError` | A Config class disabled a lifecycle invariant or declared an unsupported schema shape |
+| `AttributeError` | A draft write used an unknown field or interpolation read unavailable context |
 
-| Error | Typical cause |
-|---|---|
-| `UnsetError` | Reading an unassigned required draft field or pending interpolation |
-| `DraftError` | Using a draft or in-progress Config where a completed final is required |
-| `AttributeError` | Assigning or deleting an undeclared draft field |
-| Pydantic `ValidationError` | Missing final input, a failed constraint or validator, or interpolation failure |
-| `FingerprintError` | Non-finite, cyclic, unstable, excluded, concurrently changed, or non-JSON-safe final data |
-| `RecordError` | A malformed, tampered, wrong-type, wrong-schema, unverifiable-provenance, or non-round-tripping run record |
-| `TypeError` or `ValueError` | An invalid API argument, class definition, or structural graph |
+## Missing draft values
 
-Nested Pydantic serialization may wrap a draft rejection in
-`PydanticSerializationError`, as Pydantic does for serializer failures.
+Required scalar reads fail immediately. Required direct Config fields create a
+child draft, but a recursive required spine without a base case fails rather than
+recursing forever. Pending interpolation can be assigned and finalized but cannot
+be read from a draft.
 
 ## Interpolation failures
 
-Interpolation errors use the dependent field's Pydantic location. They identify the
-unavailable source path and the resolver source site when available. Common causes
-are:
+Interpolation errors report the target path and callable site. Common causes are:
 
-- reading a field declared after the dependent field;
-- descending through an ancestor branch that is still being validated;
-- using `parent()` at the root or asking `nearest()` for a missing ancestor;
-- returning an active partial branch instead of a completed value;
-- raising inside the resolver;
-- returning a value that fails the target field's constraints.
+- reading a later field;
+- selecting an ancestor above the current root;
+- requesting the wrong typed context model;
+- returning an active incomplete branch;
+- mutating a read-only built-in container view;
+- raising inside the user callable.
 
-Reorder the source before its dependent field or change the selector to an already
-validated ancestor. Do not catch an interpolation error and substitute raw input;
-that would mix unvalidated and canonical values.
+Reorder source fields before dependent fields. Use `C.Field(default_factory=Child.config_draft)`
+when a default child needs parent context.
 
-## Graph failures
+## Structural graph failures
 
-Finalization also checks the structural value graph. A cycle, an interpolation
-marker nested inside a container, or a config draft hidden under an opaque
-annotation fails with its graph path. Declare nested config positions explicitly
-with concrete config or container annotations.
+Draft collection follows concrete annotations through Config fields and supported
+built-in containers. A Config under `Any`, `object`, a wrong union branch, or an
+incompatible tuple or mapping position is rejected. Markers inside built-in
+containers are also rejected.
 
-Only exact built-in `dict`, `list`, `tuple`, `set`, and `frozenset` values form the
-recursive container graph after model-before validation. A model-before validator
-may normalize legacy or custom collection input into those built-ins. Any custom
-collection or lazy sync or async input that remains afterward fails, including
-iterators, generators, awaitables, and coroutines. Materialize and await them before
-validation.
+Arbitrary user objects are opaque and are not crawled for drafts or markers. If
+such an object needs lifecycle-aware children, move those children into directly
+annotated Config fields.
 
-The recursive guarantee covers Pydantic declared, extra, and private state,
-dataclass stored state, built-in containers, inspectable Python `__dict__` and
-`__slots__` state, and known carriers such as functions, bound methods, partials,
-weak references, and weak methods. Truly opaque extension state cannot be proven
-safe and must not conceal lifecycle state. Opaque callables with uninspectable
-captured state are rejected. Internal containers inside an atomic value do not
-inherit Config's structural-container policy. A mapping value containing `Config`
-structure also requires every key on its path to have exact type `str` or `int`.
+## Native Pydantic footguns
 
-Fingerprinting and records add stricter deterministic-JSON rules. They reject
-non-finite floats, non-string JSON mapping keys, excluded fields, lossy or unstable
-serializers, and values Pydantic cannot reconstruct exactly. There is no `repr()`
-fallback.
-
-Config class creation also rejects validator forms that can bypass or repeat the
-field lifecycle: model `wrap`, field `plain`/`wrap`, and deprecated
-`validator`/`root_validator` decorators. Use `before` or `after` validators.
-Declared fields also cannot shadow lifecycle APIs such as `model_dump`,
-`model_validate`, `model_copy`, or `model_fields_set`.
-Model-before validators may normalize input, but they cannot discard explicit
-declared fields. Field validators cannot use `PydanticUseDefault` to replace
-explicit input.
-
-Run records require the exact seven-field v4 envelope, matching schema, semantic,
-and value fingerprints, and self-contained interpolation provenance with structural
-integrity tokens. Interpolation must be the final event for its field. Exact
-generated generic parameterizations need distinct `record_schema_id` values; a
-uniquely named concrete subclass already has stable `module:qualname` identity.
-Stored self, later-field, and incomplete-branch reads are rejected as impossible
-under declaration-order publication.
-
-Do not fingerprint or record while another thread mutates a shallowly frozen final.
-Repeated serialization and structural snapshots detect observed changes and raise
-`FingerprintError`, but the operation is not a concurrency boundary; synchronize
-the caller.
+`model_copy(update=...)` does not validate updates. Model-after validators and
+`model_post_init` may mutate values after interpolation. Shallowly frozen finals
+may still have mutable container contents. Revalidate current concrete values with
+`type(final).model_validate(final)` when needed.

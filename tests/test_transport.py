@@ -1,4 +1,4 @@
-"""Executable transport is explicit, local, and separate from run records."""
+"""Executable transport is explicit, trusted, and local."""
 
 from importlib.metadata import version
 import os
@@ -9,7 +9,6 @@ from pathlib import Path
 
 import cloudpickle
 from packaging.version import Version
-from pydantic import field_validator
 
 import nshconfig as C
 
@@ -22,7 +21,7 @@ class ImportableRun(C.Config):
     width: int
     leaf: ImportableLeaf
 
-    @field_validator("width")
+    @C.field_validator("width")
     @classmethod
     def normalize_width(cls, value: int) -> int:
         return abs(value)
@@ -45,47 +44,35 @@ def test_supported_cloudpickle_version_is_installed():
 
 
 def test_importable_drafts_and_finals_use_normal_pickle_by_reference():
-    work = C.draft(ImportableRun)
-    with C.source("importable sender"):
-        work.width = -3
+    work = ImportableRun.config_draft()
+    work.width = -3
 
     restored_work = pickle.loads(pickle.dumps(work))
     assert C.is_draft(restored_work)
 
-    final = C.finalize(restored_work)
+    final = restored_work.config_finalize()
     assert final.width == 3
     assert final.leaf.derived == 6
-    assert C.provenance(final)["width"][0].label == "importable sender"
 
     restored_final = pickle.loads(pickle.dumps(final))
     assert restored_final == final
-    assert C.provenance(restored_final) == C.provenance(final)
 
 
-def test_cloudpickle_round_trips_drafts_finals_and_provenance():
-    work = C.draft(ImportableRun)
-    with C.source("cloudpickle sender"):
-        work.width = 4
-        work.leaf.derived = C.interp(
-            lambda context: context.root(ImportableRun).width * 3
-        )
-        final = C.finalize(work)
+def test_cloudpickle_round_trips_drafts_and_finals():
+    work = ImportableRun.config_draft()
+    work.width = 4
+    work.leaf.derived = C.interp(lambda context: context.root(ImportableRun).width * 3)
+    final = work.config_finalize()
 
     restored_work, restored_final = pickle.loads(cloudpickle.dumps((work, final)))
     assert C.is_draft(restored_work)
     assert not C.is_draft(restored_final)
     assert restored_final == final
-    assert C.provenance(restored_final) == C.provenance(final)
 
-    with C.source("cloudpickle receiver"):
-        restored_work.width = -5
-        receiver_final = C.finalize(restored_work)
+    restored_work.width = -5
+    receiver_final = restored_work.config_finalize()
     assert receiver_final.width == 5
     assert receiver_final.leaf.derived == 15
-    assert [event.label for event in C.provenance(receiver_final)["width"]] == [
-        "cloudpickle sender",
-        "cloudpickle receiver",
-    ]
 
 
 def test_import_does_not_install_global_pydantic_core_reducers():
@@ -134,13 +121,12 @@ assert cloudpickle.loads(cloudpickle.dumps(model)) == model
 
 
 _LOCAL_SENDER = """
-# Deliberately use eager annotations. Notebook classes intended for by-value
-# transport follow nshconfig's no-PEP-563 contract.
+from __future__ import annotations
+
 import os
 from pathlib import Path
 
 import cloudpickle
-from pydantic import field_validator
 
 import nshconfig as C
 
@@ -153,23 +139,21 @@ class LocalRun(C.Config):
     width: int
     leaf: LocalLeaf
 
-    @field_validator("width")
+    @C.field_validator("width")
     @classmethod
     def normalize_width(cls, value: int) -> int:
         return abs(value)
 
 
-draft = C.draft(LocalRun)
-with C.source("sender draft"):
-    draft.width = -5
-    draft.leaf.derived = C.interp(
-        lambda context: context.root(LocalRun).width * 3
-    )
+draft = LocalRun.config_draft()
+draft.width = -5
+draft.leaf.derived = C.interp(
+    lambda context: context.root(LocalRun).width * 3
+)
 
-final_recipe = C.draft(LocalRun)
-with C.source("sender final"):
-    final_recipe.width = -7
-    final = C.finalize(final_recipe)
+final_recipe = LocalRun.config_draft()
+final_recipe.width = -7
+final = final_recipe.config_finalize()
 
 payload = cloudpickle.dumps((draft, final))
 Path(os.environ["NSHCONFIG_TRANSPORT_PAYLOAD"]).write_bytes(payload)
@@ -189,34 +173,16 @@ payload = Path(os.environ["NSHCONFIG_TRANSPORT_PAYLOAD"]).read_bytes()
 draft, sender_final = cloudpickle.loads(payload)
 
 assert C.is_draft(draft)
-with C.source("receiver"):
-    draft.width = -11
-    receiver_final = C.finalize(draft)
+draft.width = -11
+receiver_final = draft.config_finalize()
 
 assert receiver_final.width == 11
 assert receiver_final.leaf.derived == 33
-receiver_events = C.provenance(receiver_final)
-assert [event.label for event in receiver_events["width"]] == [
-    "sender draft",
-    "receiver",
-]
-assert receiver_events["leaf.derived"][0].kind == "set"
-assert receiver_events["leaf.derived"][0].label == "sender draft"
-assert receiver_events["leaf.derived"][-1].kind == "interpolate"
-assert receiver_events["leaf.derived"][-1].label == "receiver"
-assert receiver_events["leaf.derived"][-1].reads == (("width", "11"),)
 
 assert not C.is_draft(sender_final)
 assert sender_final.width == 7
 assert sender_final.leaf.derived == 14
-sender_events = C.provenance(sender_final)
-assert sender_events["width"][0].label == "sender final"
-assert sender_events["leaf.derived"][-1].kind == "interpolate"
-assert sender_events["leaf.derived"][-1].label == "sender final"
-
-# Revalidation proves that the by-value class's validator and compiled schema
-# remain executable in the receiving interpreter.
-assert C.finalize(sender_final) == sender_final
+assert sender_final.model_dump() == {"width": 7, "leaf": {"derived": 14}}
 """
 
 
@@ -227,3 +193,28 @@ def test_notebook_local_classes_cross_a_process_with_cloudpickle(tmp_path: Path)
 
     _run_python(_LOCAL_SENDER, env=env)
     _run_python(_LOCAL_RECEIVER, env=env)
+
+
+def test_late_reference_and_forced_schema_rebuild_survive_transport() -> None:
+    script = """
+from __future__ import annotations
+
+import cloudpickle
+
+import nshconfig as C
+
+
+class Parent(C.Config):
+    child: Child
+
+
+class Child(C.Config):
+    value: int = 1
+
+
+assert Parent.model_rebuild() is True
+Parent.model_rebuild(force=True)
+restored = cloudpickle.loads(cloudpickle.dumps(Parent.config_draft()))
+assert restored.config_finalize() == Parent(child=Child())
+"""
+    _run_python(script)

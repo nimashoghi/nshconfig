@@ -6,10 +6,13 @@ import nshconfig as C
 from tests.scenario import TrainConfig
 
 treescope = pytest.importorskip("treescope")
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:The chararray class is deprecated.*:DeprecationWarning"
+)
 
 
 def test_draft_renders_pending_labels():
-    cfg = C.draft(TrainConfig)
+    cfg = TrainConfig.config_draft()
     cfg.model.dim = 1024
     _ = cfg.model.head  # vivify so the pending class-default rule is visible
     text = treescope.render_to_text(cfg)
@@ -24,7 +27,7 @@ def test_draft_renders_explicit_interpolation_from_pending_state():
         source: int = 2
         copied: int = 0
 
-    cfg = C.draft(Values)
+    cfg = Values.config_draft()
     cfg.copied = C.interp(lambda context: context.current().source)
 
     text = treescope.render_to_text(cfg)
@@ -33,7 +36,7 @@ def test_draft_renders_explicit_interpolation_from_pending_state():
 
 
 def test_final_renders_with_concrete_values():
-    final = C.finalize(C.draft(TrainConfig))
+    final = TrainConfig.config_draft().config_finalize()
     text = treescope.render_to_text(final)
     assert "pending" not in text
     assert "768" in text

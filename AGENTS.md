@@ -21,7 +21,6 @@ uv run pytest tests/test_interp.py -v
 # Static checks. src must remain at 0 basedpyright errors and warnings.
 uv run basedpyright src
 uv run ruff check src tests
-uv run ruff format --check src tests
 
 # Python 3.10-3.14 against the Pydantic floor and latest 2.x.
 uv run nox -s tests
@@ -36,37 +35,39 @@ Use `./scripts/publish.sh` only for an intentional release.
 ## Architecture
 
 - Pydantic owns schemas, aliases, validation, serialization, and JSON Schema.
-  Import its authoring APIs directly from `pydantic`.
-- `nshconfig` adds four distinct states: a `Config` class, a mutable incomplete
-  draft, a validated field-frozen final, and an inert JSON run record.
+  nshconfig re-exports its non-deprecated authoring API unchanged.
+- `nshconfig` adds two instance states: a mutable incomplete draft and a
+  validated, shallowly field-frozen final.
 - Calling a `Config` class creates a final. Create composition state only with
-  `draft(ConfigType)` and cross the validation boundary with the non-destructive
-  `finalize()` function.
+  `ConfigType.config_draft()` and cross the validation boundary with the
+  non-destructive `draft.config_finalize()` method.
+- Normal constructor finals used as defaults are templates. Parent drafts project
+  default-origin Config values to fresh drafts recursively through concrete
+  structural annotations. Explicitly assigned finals remain finals.
 - Interpolation is a whole-field Python callable. Field declaration order is
   dependency order, and interpolation may read only canonical values whose
   complete field validation has already finished.
-- Draft writes, deletion, built-in container mutation, and interpolation produce
-  provenance. `explain()` follows interpolation dependencies.
-- Finals are shallowly field-frozen and all `Config` instances are unhashable.
-  Use `fingerprint()` for deterministic content identity.
-- Run records contain concrete JSON-safe values and provenance. Loading one must
-  never execute interpolation. Cloudpickle is separate, trusted, short-lived
+- Drafts are unhashable. Finals use frozen-Pydantic field-value hashing and are
+  hashable exactly when their field values are hashable.
+- `model_copy()` and model validators retain native Pydantic behavior on finals.
+  Draft copies are rejected. Cloudpickle is optional, trusted, short-lived
   executable transport.
 - Structural `Config` positions must have concrete annotations. Drafts and
-  interpolation markers may not be hidden under `Any`, `object`, or opaque
-  values.
-- The public API is the narrow function-based surface in
-  `src/nshconfig/__init__.py`. There are no Pydantic re-exports, duplicate model
-  verbs, registry, loader, code generator, global model settings, or global
-  pickle reducers.
+  interpolation markers may not be hidden under `Any`, `object`, or incompatible
+  built-in positions. Arbitrary user objects are opaque.
+- The public API is the explicit surface in `src/nshconfig/__init__.py`. There are
+  no top-level draft/finalize functions, provenance, records, fingerprints,
+  registry, loader, code generator, global model settings, or global pickle
+  reducers. Pydantic authoring names are explicit re-exports, not wrappers.
 
 ## Engineering rules
 
-- Do not use `from __future__ import annotations`. Quote a forward reference only
-  when its name is defined later. Eager annotations are required for reliable
-  Pydantic schema transport of notebook-defined classes across Python 3.10-3.14.
+- Support eager annotations, quoted forward references, and
+  `from __future__ import annotations`, including by-value cloudpickle transport
+  of notebook-defined classes across Python 3.10-3.14.
 - Preserve the lifecycle-enforcing Pydantic settings documented in `DESIGN.md`.
-  Project-specific policy, such as strictness, belongs in a project base class.
+  Strict validation and attribute-docstring descriptions are default policies;
+  project-specific policy belongs in a project base class.
 - Prefer small explicit functions and ordinary Pydantic behavior over new
   framework layers, dynamic dispatch, registries, or compatibility shims for
   removed APIs.
