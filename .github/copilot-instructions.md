@@ -1,136 +1,70 @@
-# nshconfig - AI Coding Agent Instructions
+# nshconfig coding instructions
 
-## Project Overview
+`nshconfig` is a small typed configuration lifecycle over Pydantic. Read
+`DESIGN.md` before changing semantics; it is authoritative. `README.md` introduces
+the library and `SKILL.md` gives the canonical usage workflow.
 
-`nshconfig` is a configuration management library built on top of Pydantic v2. It provides enhanced features for typed configurations including draft configs, registries for dynamic type resolution, singleton patterns, and code generation tools.
+## Ownership and public surface
 
-## Development Environment
+Pydantic owns schema declaration, aliases, constraints, validation,
+serialization, and JSON Schema. Application code imports `Field`, validators,
+`ConfigDict`, and other authoring APIs from `pydantic`.
 
-This project uses **UV** for dependency management and packaging (with **uv_build** as the build backend).
+Calling `ConfigType(...)` returns an ordinary validated final.
+`ConfigType.config_draft()` creates mutable incomplete composition state, and
+`draft.config_finalize()` validates it into a fresh final. Interpolation is a
+whole-field callable evaluated in declaration order over canonical earlier values.
 
-### Key Commands
+Normal constructor finals used as defaults are templates. A parent draft projects
+default-origin Config values to fresh drafts through concrete structural
+annotations. Explicitly assigned finals remain finals.
+
+The public package surface is `Config`, `Context`, `interp`, `is_draft`,
+`DraftError`, `UnsetError`, and `__version__`. Do not add Pydantic re-exports,
+top-level draft/finalize aliases, provenance, records, fingerprints, dynamic verb
+dispatch, registries, loaders, code generation, global model settings, or global
+pickle reducers.
+
+## Semantic invariants
+
+- Draft creation runs no Pydantic hooks. Draft writes are unvalidated and unknown
+  fields fail immediately.
+- Finalization is explicit and non-destructive. Drafts cannot be copied or
+  serialized.
+- Pydantic field declaration order is interpolation dependency order. A derived
+  field sees only earlier canonical values after complete field validation.
+- Model hooks and final `model_copy()` retain native Pydantic semantics. Copy
+  updates are unvalidated and model-after hooks may make interpolation stale.
+- Structural Config positions need concrete annotations. Do not hide Config
+  values under `Any`, `object`, or incompatible built-in positions. Arbitrary user
+  objects are opaque.
+- Finals are shallowly field-frozen. Drafts are unhashable; finals use
+  frozen-Pydantic field-value hashing.
+- Cloudpickle is optional, trusted, short-lived executable transport. It is not a
+  durable or safe data format.
+
+## Python and testing rules
+
+- Target Python 3.10-3.14 and Pydantic `>=2.13,<3`.
+- Never add `from __future__ import annotations`. Quote forward references only
+  when a name is defined later; eager annotations keep notebook and cloudpickle
+  schema transport reliable.
+- Prefer small explicit functions and native Pydantic behavior over framework
+  abstractions or compatibility layers.
+- Test through the public API. Update `DESIGN.md`, public tests, `README.md`, and
+  `SKILL.md` together for intentional semantic changes.
+- Keep `uv run basedpyright src` at zero errors and warnings. Golden diagnostics
+  in `tests/typing_probes/` are contractual. Subprocess transport tests are
+  required cloudpickle canaries.
+
+## Verification
 
 ```bash
-# Install dependencies (including dev dependencies)
-uv sync --all-groups
-
-# Run tests
+uv sync --locked --all-groups --all-extras
 uv run pytest
-
-# Run tests with coverage
-uv run pytest --cov=nshconfig --cov-report=term-missing
-
-# Type checking
+uv run ruff check src tests
 uv run basedpyright src
-
-# Linting
-uv run ruff check src
-
-# Add a new dependency
-uv add <package>           # runtime dependency
-uv add --group dev <pkg>   # dev dependency
-
-# Run any command in the UV environment
-uv run <command>
-```
-
-## Architecture
-
-### Source Layout
-
-- **[src/nshconfig/](src/nshconfig/)** - Main package using src-layout
-    - **[\_src/](src/nshconfig/_src/)** - Core implementation modules (private)
-    - **[bin/](src/nshconfig/bin/)** - CLI entry points (`nshconfig-export`)
-- **[tests/](tests/)** - pytest test suite
-- **[docs/](docs/)** - Sphinx documentation
-
-### Core Components
-
-1. **Config** ([\_src/config.py](src/nshconfig/_src/config.py)) - Base class extending Pydantic's `BaseModel` with:
-    - Draft configs via `Config.draft()` / `.finalize()`
-    - Multi-format serialization (JSON, YAML, TOML, Python files)
-    - MutableMapping interface for Lightning compatibility
-    - Schema URI injection for JSON/YAML files
-
-2. **Registry** ([\_src/registry.py](src/nshconfig/_src/registry.py)) - Dynamic discriminated unions:
-    - Register subclasses with `@registry.register`
-    - Auto-rebuild parent schemas when new types are registered
-    - Use `Annotated[BaseType, registry]` in field annotations
-
-3. **MISSING** ([\_src/missing.py](src/nshconfig/_src/missing.py)) - Optional field handling:
-    - Use `AllowMissing[T]` type alias for optional fields
-    - Assign `MISSING` as default value
-    - Validate with `validate_no_missing()`
-
-4. **Export/Codegen** ([\_src/export.py](src/nshconfig/_src/export.py)) - Code generation:
-    - CLI: `nshconfig-export` generates TypedDicts and JSON schemas
-    - Use `Export()` annotation to mark types for export
-
-## Patterns & Conventions
-
-### Config Class Definition
-
-```python
-from __future__ import annotations
-import nshconfig as C
-from typing import Literal
-
-class MyConfig(C.Config):
-    name: str
-    value: int
-    optional_field: C.AllowMissing[float] = C.MISSING
-```
-
-### Registry Pattern for Plugins
-
-```python
-from abc import ABC, abstractmethod
-from typing import Annotated, Literal
-
-class PluginBase(C.Config, ABC):
-    type: str
-
-registry = C.Registry(PluginBase, discriminator="type")
-
-@registry.register
-class MyPlugin(PluginBase):
-    type: Literal["my_plugin"] = "my_plugin"
-
-class AppConfig(C.Config):
-    plugin: Annotated[PluginBase, registry]
-```
-
-### Important Code Style
-
-- All Python files MUST start with `from __future__ import annotations`
-- Use `typing_extensions` for backports (project supports Python 3.9+)
-- Pydantic v2 compatibility: check `PYDANTIC_VERSION` for version-specific code paths
-- Type checking with `basedpyright` in standard mode
-
-## Testing
-
-Tests use pytest with fixtures in [conftest.py](tests/conftest.py). Run specific tests:
-
-```bash
-uv run pytest tests/test_registry.py -v  # Registry tests
-uv run pytest tests/test_config.py -v    # Config serialization tests
-```
-
-Multi-version testing via nox (tests against multiple Python + Pydantic versions):
-
-```bash
+uv run sphinx-build -W --keep-going -b html docs/source docs/build/html
 uv run nox -s tests
+uv build --clear
 ```
-
-## Common Tasks
-
-### Adding New Config Features
-
-1. Add implementation to appropriate `_src/*.py` module
-2. Export from `__init__.py` if public API
-3. Add tests in `tests/test_*.py`
-4. Update docs if user-facing
-
-### Modifying Serialization
-
-The Config class supports JSON, YAML, TOML, and Python file formats. Format-specific code is in [\_src/config.py](src/nshconfig/_src/config.py) methods like `to_json_str()`, `from_yaml()`, etc.

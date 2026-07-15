@@ -1,64 +1,60 @@
-"""Free-threading posture: all draft and resolution state is instance/context-local."""
+"""Concurrent validation must isolate every interpolation context."""
 
-import threading
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import nshconfig as C
-from tests.scenario import TrainConfig
 
 
-def test_concurrent_drafts_are_isolated():
-    n = 8
-    barrier = threading.Barrier(n)
-    results: dict[int, tuple[int, int]] = {}
-    errors: list[BaseException] = []
-
-    def worker(i: int) -> None:
-        try:
-            barrier.wait()
-            cfg = TrainConfig.config_draft()
-            cfg.model.dim = 100 + i
-            cfg.model.encoder.ln.dim = C.interp(lambda c, i=i: c.root().model.dim + i)
-            for _ in range(50):  # interleave writes across threads
-                cfg.batch = i
-            f = C.finalize(cfg)
-            results[i] = (f.model.encoder.ln.dim, f.model.head.dim)
-        except BaseException as e:  # noqa: BLE001
-            errors.append(e)
-
-    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    assert not errors
-    for i in range(n):
-        assert results[i] == (100 + 2 * i, 100 + i)
+class ThreadLeaf(C.Config):
+    derived: int
 
 
-def test_concurrent_finalize_of_shared_classes():
-    # Same CLASSES, distinct trees, all finalizing at once: the ContextVar stack and
-    # the handler-cache-free draft writes must never bleed across threads.
-    n = 8
-    barrier = threading.Barrier(n)
-    out: dict[int, int] = {}
-    errors: list[BaseException] = []
+class ThreadConfig(C.Config):
+    source: int
+    leaf: ThreadLeaf
 
-    def worker(i: int) -> None:
-        try:
-            barrier.wait()
-            for _ in range(25):
-                cfg = TrainConfig.config_draft()
-                cfg.model.dim = i * 1000
-                out[i] = C.finalize(cfg).model.head.dim
-        except BaseException as e:  # noqa: BLE001
-            errors.append(e)
 
-    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+def test_interpolation_context_is_isolated_between_threads():
+    worker_count = 8
+    rounds = 16
+    resolver_barrier = Barrier(worker_count)
 
-    assert not errors
-    assert all(out[i] == i * 1000 for i in range(n))
+    def worker(
+        index: int,
+    ) -> list[int]:
+        results: list[int] = []
+        for round_index in range(rounds):
+            work = ThreadConfig.config_draft()
+            source_value = index * 1_000 + round_index
+
+            def resolve(context: C.Context) -> int:
+                resolver_barrier.wait(timeout=20)
+                source = context.root(ThreadConfig).source
+                resolver_barrier.wait(timeout=20)
+                return source * 10 + index
+
+            work.source = source_value
+            work.leaf.derived = C.interp(resolve)
+            final = work.config_finalize()
+            results.append(final.leaf.derived)
+
+        # ThreadPoolExecutor reuses the same worker context for every round. This
+        # finalization proves interpolation stack tokens were reset in the
+        # originating thread, not merely isolated from other threads.
+        cleanup = ThreadConfig.config_draft()
+        cleanup.source = index
+        cleanup.leaf.derived = C.interp(
+            lambda context: context.parent(ThreadConfig).source
+        )
+        cleanup_final = cleanup.config_finalize()
+        assert cleanup_final.leaf.derived == index
+        return results
+
+    with ThreadPoolExecutor(max_workers=worker_count) as pool:
+        results = list(pool.map(worker, range(worker_count)))
+
+    for index, worker_results in enumerate(results):
+        for round_index, derived in enumerate(worker_results):
+            source_value = index * 1_000 + round_index
+            assert derived == source_value * 10 + index

@@ -1,0 +1,125 @@
+name: CI
+
+on:
+    push:
+    pull_request:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ci-${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    tests:
+        name: Tests
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+            - name: Install uv and Python
+              uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+              with:
+                  version: "0.11.28"
+                  python-version: "3.14"
+                  enable-cache: true
+
+            - name: Install dependencies
+              run: uv sync --locked --all-groups --all-extras
+
+            - name: Run tests
+              run: uv run pytest
+
+    static-analysis:
+        name: Static analysis
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+            - name: Install uv and Python
+              uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+              with:
+                  version: "0.11.28"
+                  python-version: "3.14"
+                  enable-cache: true
+
+            - name: Install dependencies
+              run: uv sync --locked --all-groups --all-extras
+
+            - name: Lint
+              run: uv run ruff check src tests
+
+            - name: Check formatting
+              run: uv run ruff format --check src tests
+
+            - name: Type check
+              run: uv run basedpyright src
+
+    support-matrix:
+        name: Python ${{ matrix.python-version }} / Pydantic ${{ matrix.pydantic }}
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+                pydantic: [floor, latest]
+        steps:
+            - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+            - name: Install uv and Python
+              uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+              with:
+                  version: "0.11.28"
+                  python-version: ${{ matrix.python-version }}
+                  enable-cache: true
+
+            - name: Install nox
+              run: uv sync --locked --group dev
+
+            - name: Run support-matrix tests
+              run: uv run nox -s "tests-${{ matrix.python-version }}(${{ matrix.pydantic }})"
+
+    docs:
+        name: Documentation
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+            - name: Install uv and Python
+              uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+              with:
+                  version: "0.11.28"
+                  python-version: "3.14"
+                  enable-cache: true
+
+            - name: Install dependencies
+              run: uv sync --locked --all-groups --all-extras
+
+            - name: Build documentation
+              run: uv run sphinx-build -W --keep-going -b html docs/source docs/build/html
+
+    package:
+        name: Package
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+            - name: Install uv and Python
+              uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+              with:
+                  version: "0.11.28"
+                  python-version: "3.14"
+                  enable-cache: true
+
+            - name: Build distributions
+              run: uv build --clear
+
+            - name: Check distribution metadata
+              run: uv run twine check dist/*
+
+            - name: Smoke test wheel
+              run: uv run --isolated --no-project --with dist/*.whl -- python -c "import nshconfig"
+
+            - name: Smoke test source distribution
+              run: uv run --isolated --no-project --with dist/*.tar.gz -- python -c "import nshconfig"

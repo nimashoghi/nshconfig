@@ -1,17 +1,23 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Publish script for nshconfig package
-set -e
-set -u
+set -euo pipefail
 
-# 0. Make sure all dependencies are installed
-uv sync --all-extras --all-groups
+if ! git diff --quiet || ! git diff --cached --quiet || \
+    test -n "$(git ls-files --others --exclude-standard)"; then
+    echo "Refusing to publish from a dirty worktree." >&2
+    exit 1
+fi
 
-# 1. Run checks (loading .env if your tests need it)
-uv run --env-file .env ruff check
-uv run --env-file .env basedpyright
-uv run --env-file .env pytest
+uv sync --locked --all-extras --all-groups
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run basedpyright src
+uv run pytest
+uv run nox -s tests
+uv run sphinx-build -E -W --keep-going -b html docs/source docs/build/html
 
-# 2. Build and Publish
 uv build --clear
-uv run --env-file .env uv publish $@
+uv run twine check dist/*
+uv run --isolated --no-project --with dist/*.whl -- python -c "import nshconfig"
+uv run --isolated --no-project --with dist/*.tar.gz -- python -c "import nshconfig"
+uv publish "$@"

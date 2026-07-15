@@ -1,41 +1,53 @@
-# The typing story, honestly
+# Typing
 
-The supported checker is basedpyright. The contract is enforced by golden probe files in the
-test suite: a clean probe that must stay clean, and a seeded-mistakes probe whose every error
-must keep firing.
+`Config` uses Pydantic's dataclass transform for ordinary construction. The two
+lifecycle methods return `Self`:
 
-## What basedpyright checks
+```python
+work = Model.config_draft()       # inferred as Model
+final = work.config_finalize()    # inferred as Model
+```
 
-- **The interp lambda's return type, at both slots.** `derive`-style factories are typed
-  `(Callable[[Ctx], T]) -> T`, so `dim: int = C.interp(lambda c: "oops")` and
-  `cfg.ln.dim = C.interp(lambda c: "oops")` are edit-time errors.
-- **Typed selector field access.** `c.root(TrainConfig).model`,
-  `c.parent(ModelConfig).dim`, `c.parent(2, TrainConfig).batch`, and
-  `c.self(LNConfig).dim` expose the selected config type to basedpyright, so misspelled
-  fields and incompatible return types are edit-time errors.
-- **Draft writes and reads.** Drafts are typed as the real class and the draft machinery is
-  hidden from the checker, so `cfg.model.dmi = 3` and `cfg.dim = "1024"` are static errors.
-- **Helper signatures** (`def large(cfg: TrainConfig) -> None`), `finalize`'s `(C) -> C`, and
-  everything else around the lambda.
+Static typing intentionally does not distinguish a draft from a final. The same
+typed object flows through project mutators, while lifecycle misuse fails at
+runtime.
 
-## What it cannot check (loud at runtime instead)
+```python
+def resnet50(cfg: Model, *, dim: int = 256) -> Model:
+    cfg.dim = dim
+    return cfg
+```
 
-- **Untyped selector bodies.** `c.root()`, `c.parent()`, `c.parent(n)`, and `c.self()` return
-  dynamic views. This is the same accepted trade as pydantic's data-aware
-  `default_factory`. The runtime backstop is pydantic itself: every resolved value is
-  validated against the field's annotation and constraints.
-- **Anchor reachability.** `c.nearest(ModelConfig)` where no `ModelConfig` encloses
-  type-checks and fails at finalize with the searched ancestor chain. Typed selectors also
-  type-check structurally but assert the selected frame at runtime.
-- **Lifecycle stage.** Drafts and finals share a static type; `C.is_draft()` exists for
-  boundaries that care, and `C.finalize()` is idempotent so boundary code can normalize.
+Draft field assignments are checked against declared field types. Runtime draft
+assignment remains unvalidated, so a suppressed type error still fails during
+finalization.
 
-## The contained lies, and their gates
+## Typed interpolation context
 
-| Lie | Gate |
-|---|---|
-| `interp(...)` claims type `T` while being a marker (the `Field()` precedent) | hygiene dunders (`bool`/format raise), the root no-survivors sweep |
-| Draft mutation on a frozen-typed class typechecks | runtime frozen check rejects writes to finals; pyright does not enforce `model_config`-level frozen (only the class-kwarg spelling), and the draft idiom deliberately relies on that — a golden-probe canary guards the assumption |
+Pass the expected Config type to a selector for checked field access:
 
-Note for mypy users: pydantic's mypy plugin flags writes to frozen models regardless of
-spelling, so the draft idiom reports errors under it. basedpyright is the supported checker.
+```python
+class Leaf(C.Config):
+    copied: int = C.interp(lambda context: context.parent(Model).dim)
+```
+
+`current(Model)`, `parent(Model)`, `parent(2, Model)`, `root(Run)`, and
+`nearest(Model)` return the requested static type. Selector reachability and field
+declaration order remain runtime properties.
+
+## Eager annotations
+
+Do not use `from __future__ import annotations` in Config modules. Quote only a
+forward reference whose name is genuinely defined later. Eager annotations are
+required for reliable Pydantic schema transport of notebook-defined classes across
+Python 3.10 through 3.14.
+
+Names used only inside an interpolation lambda are resolved when the callable
+runs, so a later class may be referenced without turning the field annotation into
+a string.
+
+## Supported checker
+
+[basedpyright](https://docs.basedpyright.com/) is the checked contract. The
+repository includes positive and negative golden probes under
+`tests/typing_probes/`. Diagnostic changes are treated as typing behavior changes.

@@ -1,350 +1,277 @@
-"""Resolution semantics: the one rule, the precedence ladder, the visibility matrix.
+"""Interpolation is a declaration-ordered read of canonical Pydantic values."""
 
-Ported from the design panel's verified T-series battery (semU), adapted to the
-v2 API, plus the Field/Annotated composition checks from the playground session.
-"""
-
-from typing import Annotated
+from typing import Annotated, Any
 
 import pytest
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, field_validator, model_validator
 
 import nshconfig as C
 
-# ---- family 1: class-default marker ----
 
+class BasicConfig(C.Config):
+    source: int = 4
+    class_derived: int = C.interp(lambda context: context.current().source * 2)
+    replaceable: int = 7
 
-class LNConfig(C.Config):
-    dim: int = C.interp(lambda c: c.nearest(ModelConfig).dim)
-    eps: float = 1e-5
 
+def test_class_default_and_instance_markers_share_one_validation_boundary():
+    assert BasicConfig().class_derived == 8
 
-class EncoderConfig(C.Config):
-    ln: LNConfig
+    work = BasicConfig.config_draft()
+    work.source = 5
+    work.replaceable = C.interp(lambda context: context.current().source + 1)
 
+    final = work.config_finalize()
+    assert final.class_derived == 10
+    assert final.replaceable == 6
 
-class ModelConfig(C.Config):
-    dim: int = 768
-    encoder: EncoderConfig
 
+def test_explicit_values_override_markers_and_deletion_reactivates_defaults():
+    work = BasicConfig.config_draft()
+    work.source = 5
+    work.class_derived = 99
+    work.replaceable = C.interp(lambda context: context.current().source + 1)
 
-class TrainConfig(C.Config):
-    width: int = 512
-    model: ModelConfig
+    assert work.config_finalize().class_derived == 99
+    assert work.config_finalize().replaceable == 6
 
+    del work.class_derived
+    del work.replaceable
 
-# ---- family 2: NO markers anywhere in class bodies (pure instance-level) ----
+    final = work.config_finalize()
+    assert final.class_derived == 10
+    assert final.replaceable == 7
 
 
-class PlainLN(C.Config):
-    dim: int = 16
-    eps: float = 1e-5
+def test_alias_selected_and_field_validator_normalized_source_is_canonical():
+    calls: list[int] = []
 
+    class AliasedConfig(C.Config):
+        source: int = Field(alias="wire_source")
+        copied: int = Field(
+            default=C.interp(lambda context: context.current().source),
+            alias="wire_copied",
+        )
 
-class PlainEncoder(C.Config):
-    ln: PlainLN
+        @field_validator("source")
+        @classmethod
+        def normalize_source(cls, value: int) -> int:
+            calls.append(value)
+            return value * 10
 
+    interpolated = AliasedConfig.model_validate({"wire_source": 3})
+    assert interpolated.source == 30
+    assert interpolated.copied == 30
+    assert calls == [3]
 
-class PlainModel(C.Config):
-    dim: int = 768
-    encoder: PlainEncoder
+    calls.clear()
+    overridden = AliasedConfig.model_validate({"wire_source": 4, "wire_copied": 91})
+    assert overridden.source == 40
+    assert overridden.copied == 91
+    assert calls == [4]
 
 
-class PlainTrain(C.Config):
-    width: int = 512
-    model: PlainModel
-    note: str = "x"
+def test_interpolation_cannot_read_a_later_field():
+    class WrongOrder(C.Config):
+        early: int = C.interp(lambda context: context.current().later)
+        later: int = 7
 
+    with pytest.raises(ValidationError) as caught:
+        WrongOrder()
 
-# ---- family 3: siblings ----
+    error = caught.value.errors(include_url=False)[0]
+    assert error["loc"] == ("early",)
+    assert error["type"] == "nshconfig_interpolation"
+    assert error["ctx"]["path"] == "early"
+    assert "later has not been validated yet" in error["ctx"]["error"]
+    assert "declare the source field" in error["ctx"]["error"]
 
 
-class A(C.Config):
-    x: int = 0
+def test_interpolated_result_runs_the_target_field_pipeline():
+    class ConstrainedConfig(C.Config):
+        source: int = -3
+        positive: Annotated[int, Field(gt=0)] = C.interp(
+            lambda context: context.current().source
+        )
 
+    with pytest.raises(ValidationError) as caught:
+        ConstrainedConfig()
 
-class B(C.Config):
-    y: int = 0
+    error = caught.value.errors(include_url=False)[0]
+    assert error["loc"] == ("positive",)
+    assert error["type"] == "greater_than"
+    assert error["ctx"] == {"gt": 0}
 
 
-class Pair(C.Config):
-    width: int = 64
-    a: A
-    b: B
+def test_model_before_changes_input_before_fields_and_interpolation_run():
+    calls: list[dict[str, Any]] = []
 
-
-class ReqX(C.Config):
-    x: int  # required scalar
-
-
-class PairReq(C.Config):
-    width: int = 64
-    r: ReqX
-
-
-# ---- family 4: same level ----
-
-
-class Lvl(C.Config):
-    a: int = 10
-    b: int = 2
-    c2: int = 3
-
-
-def test_t1_class_default_marker_fills_absent_field():
-    d = TrainConfig.config_draft()
-    d.model.dim = 1024
-    assert C.finalize(d).model.encoder.ln.dim == 1024
-
-
-def test_t2_instance_marker_on_plain_classes():
-    d = PlainTrain.config_draft()
-    d.model.encoder.ln.dim = C.interp(lambda c: c.nearest(PlainModel).dim)
-    d.model.dim = 320
-    assert C.finalize(d).model.encoder.ln.dim == 320
-
-
-def test_t3_marker_as_plain_dict_input_value():
-    f = PlainTrain.model_validate(
-        {
-            "model": {
-                "dim": 256,
-                "encoder": {"ln": {"dim": C.interp(lambda c: c.nearest(PlainModel).dim)}},
-            }
-        }
-    )
-    assert f.model.encoder.ln.dim == 256
-
-
-def test_t5_precedence_ladder_and_del():
-    d = TrainConfig.config_draft()
-    d.model.encoder.ln.dim = 7
-    assert C.finalize(d).model.encoder.ln.dim == 7  # concrete beats class marker
-    del d.model.encoder.ln.dim
-    assert C.finalize(d).model.encoder.ln.dim == 768  # del re-arms class marker
-
-    d = TrainConfig.config_draft()
-    d.model.dim = 100
-    d.model.dim = 200
-    assert C.finalize(d).model.dim == 200  # last write wins
-
-    d = TrainConfig.config_draft()
-    d.model.dim = 10
-    d.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim * 2)
-    d.model.encoder.ln.dim = 5
-    assert C.finalize(d).model.encoder.ln.dim == 5  # marker then concrete
-
-    d = TrainConfig.config_draft()
-    d.model.dim = 10
-    d.model.encoder.ln.dim = 5
-    d.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim * 2)
-    assert C.finalize(d).model.encoder.ln.dim == 20  # concrete then marker
-
-    d = PlainTrain.config_draft()
-    d.model.encoder.ln.eps = C.interp(lambda c: c.root().width / 100)
-    del d.model.encoder.ln.eps
-    assert C.finalize(d).model.encoder.ln.eps == 1e-5  # del marker -> static default
-
-    d = PairReq.config_draft()
-    d.r.x = C.interp(lambda c: c.root().width)
-    del d.r.x
-    with pytest.raises(ValidationError):  # del marker on required -> missing
-        C.finalize(d)
-
-    d = PlainTrain.config_draft()
-    del d.model.dim  # never set: no-op
-    assert C.finalize(d).model.dim == 768
-
-
-def test_t6_marker_satisfies_required_field():
-    d = PairReq.config_draft()
-    d.r.x = C.interp(lambda c: c.root().width)
-    assert C.finalize(d).r.x == 64
-
-    d = PairReq.config_draft()
-    d.r = ReqX.config_draft(x=C.interp(lambda c: c.root().width))  # marker via draft(**kwargs)
-    assert C.finalize(d).r.x == 64
-
-
-def test_t7_ancestor_frames_resolved_root_descent_raw():
-    d = TrainConfig.config_draft()
-    d.model.dim = C.interp(lambda c: c.root().width * 2)
-    f = C.finalize(d)
-    assert f.model.dim == 1024
-    assert f.model.encoder.ln.dim == 1024  # class marker chains off RESOLVED ancestor
-
-    d = PlainTrain.config_draft()
-    d.model.dim = C.interp(lambda c: c.root().width * 2)
-    d.model.encoder.ln.dim = C.interp(lambda c: c.nearest(PlainModel).dim)
-    assert C.finalize(d).model.encoder.ln.dim == 1024  # chain via nearest() frame
-
-    d = PlainTrain.config_draft()
-    d.model.dim = C.interp(lambda c: c.root().width * 2)
-    d.model.encoder.ln.dim = C.interp(lambda c: c.root().model.dim)  # raw frame!
-    with pytest.raises(ValidationError, match="pending interpolation"):
-        C.finalize(d)  # root dotted descent sees raw input: documented one-pass limit
-
-
-def test_t8_sibling_reads_via_root():
-    d = Pair.config_draft()
-    d.b.y = 7
-    d.a.x = C.interp(lambda c: c.root().b.y)  # a validates BEFORE b
-    assert C.finalize(d).a.x == 7
-
-    d = Pair.config_draft()
-    d.a.x = 3
-    d.b.y = C.interp(lambda c: c.root().a.x)  # b validates AFTER a
-    assert C.finalize(d).b.y == 3
-
-    d = Pair.config_draft()
-    d.a.x = C.interp(lambda c: c.root().b.y)  # b untouched: static class default
-    assert C.finalize(d).a.x == 0
-
-
-def test_t10_same_level_declaration_order():
-    d = Lvl.config_draft()
-    d.b = C.interp(lambda c: c.self().a * 2)
-    d.c2 = C.interp(lambda c: c.self().b + 1)  # reads the RESOLVED b (earlier in order)
-    f = C.finalize(d)
-    assert (f.b, f.c2) == (20, 21)
-
-    d = Lvl.config_draft()
-    d.a = C.interp(lambda c: c.self().b)  # later field, concrete
-    d.b = 5
-    assert C.finalize(d).a == 5
-
-    d = Lvl.config_draft()
-    d.a = C.interp(lambda c: c.self().b)  # later field untouched: static default
-    assert C.finalize(d).a == 2
-
-
-def test_t11_below_reads_into_own_subtree():
-    class PlainLeaf(C.Config):
-        y: int = 5
-        z: int = 0
-
-    class PlainMid(C.Config):
-        x: int = 0
-        leaf: PlainLeaf
-
-    d = PlainMid.config_draft()
-    d.x = C.interp(lambda c: c.self().leaf.z)
-    d.leaf.z = 9
-    assert C.finalize(d).x == 9  # below-read of user-set value
-
-    d = PlainMid.config_draft()
-    d.x = C.interp(lambda c: c.self().leaf.y)  # leaf untouched: static default
-    assert C.finalize(d).x == 5
-
-
-def test_field_and_annotated_composition():
-    class Tunable(C.Config):
-        dim: int = 555
-        a: int = Field(default=C.interp(lambda c: c.parent().dim), gt=0)
-        b: Annotated[int, Field(multiple_of=5)] = C.interp(lambda c: c.parent().dim)
-
-    class Host(C.Config):
-        dim: int = 555
-        t: Tunable
-
-    f = Host.model_validate({"t": {}})
-    assert (f.t.a, f.t.b) == (555, 555)
-    assert Tunable(dim=1, a=7, b=10).a == 7  # explicit beats marker everywhere
-
-    class BadHost(C.Config):
-        dim: int = -3  # violates a's gt=0 AFTER resolution
-        t: Tunable
-
-    with pytest.raises(ValidationError, match="greater than 0"):
-        BadHost.model_validate({"t": {"b": 10}})  # interpolation feeds validation
-
-
-def test_ctx_typed_and_untyped_selectors():
-    class WidthRoot(C.Config):
-        width: int = 17
+    class BeforeConfig(C.Config):
+        source: int
+        copied: int = C.interp(lambda context: context.current().source)
+
+        @model_validator(mode="before")
+        @classmethod
+        def rewrite_input(cls, value: Any) -> Any:
+            assert isinstance(value, dict)
+            calls.append(dict(value))
+            return {**value, "source": value["source"] * 10}
+
+    final = BeforeConfig.model_validate({"source": 3})
+    assert final.source == 30
+    assert final.copied == 30
+    assert calls == [{"source": 3}]
+
+
+def test_model_after_can_change_a_published_field_with_native_pydantic_semantics():
+    class MutatingAfterValidator(C.Config):
+        source: int = 3
+        copied: int = C.interp(lambda context: context.current().source)
+
+        @model_validator(mode="after")
+        def change_source(self) -> "MutatingAfterValidator":
+            object.__setattr__(self, "source", self.source + 1)
+            return self
+
+    final = MutatingAfterValidator()
+    assert (final.source, final.copied) == (4, 3)
+
+
+def test_typed_and_untyped_selectors_read_the_active_root_to_current_path():
+    class Constants(C.Config):
+        scale: int
 
     class Leaf(C.Config):
-        own: int = 2
-        from_root_untyped: int = C.interp(lambda c: c.root().width)
-        from_root_typed: int = C.interp(lambda c: c.root(WidthRoot).width)
-        from_parent_typed: int = C.interp(lambda c: c.parent(PlainModel).dim)
-        from_self_typed: int = C.interp(lambda c: c.self(Leaf).own)
+        own: int
+        current_untyped: int = C.interp(lambda context: context.current().own)
+        current_typed: int = C.interp(lambda context: context.current(Leaf).own)
+        parent_untyped: int = C.interp(lambda context: context.parent().branch_value)
+        parent_typed: int = C.interp(
+            lambda context: context.parent(Branch).branch_value
+        )
+        root_untyped: int = C.interp(lambda context: context.root().constants.scale)
+        root_typed: int = C.interp(lambda context: context.root(Root).root_value)
+        grandparent_untyped: int = C.interp(
+            lambda context: context.parent(2).root_value
+        )
+        grandparent_typed: int = C.interp(
+            lambda context: context.parent(2, Root).root_value
+        )
+        nearest_branch: int = C.interp(
+            lambda context: context.nearest(Branch).branch_value
+        )
+        through_active_path: int = C.interp(
+            lambda context: context.root().branch.leaf.own
+        )
 
-    class Model(PlainModel):
-        dim: int = 9
+    class Branch(C.Config):
+        branch_value: int
         leaf: Leaf
-
-    class RootTrain(WidthRoot):
-        model: Model
-
-    d = RootTrain.config_draft()
-    d.width = 23
-    d.model.dim = 11
-    f = C.finalize(d)
-    assert f.model.leaf.from_root_untyped == 23
-    assert f.model.leaf.from_root_typed == 23
-    assert f.model.leaf.from_parent_typed == 11
-    assert f.model.leaf.from_self_typed == 2
-
-    class UntypedLeaf(C.Config):
-        from_root: int = C.interp(lambda c: c.root().width)
-
-    class UntypedRoot(C.Config):
-        width: int = 17
-        leaf: UntypedLeaf
-
-    assert C.finalize(UntypedRoot.config_draft()).leaf.from_root == 17
-
-
-def test_ctx_parent_exact_hops_and_parent_field_names():
-    class Leaf(C.Config):
-        grandparent_dim: int = C.interp(lambda c: c.parent(2).dim)
-        grandparent_dim_typed: int = C.interp(lambda c: c.parent(2, PlainModel).dim)
-
-    class HasParentField(C.Config):
-        parent: int = 31
-        child_value: int = C.interp(lambda c: c.self().parent)
-
-    class Mid(C.Config):
-        leaf: Leaf
-        named: HasParentField
-
-    class Model(PlainModel):
-        mid: Mid
 
     class Root(C.Config):
-        model: Model
+        root_value: int
+        constants: Constants
+        branch: Branch
 
-    d = Root.config_draft()
-    d.model.dim = 41
-    f = C.finalize(d)
-    assert f.model.mid.leaf.grandparent_dim == 41
-    assert f.model.mid.leaf.grandparent_dim_typed == 41
-    assert f.model.mid.named.child_value == 31
+    final = Root.model_validate(
+        {
+            "root_value": 7,
+            "constants": {"scale": 11},
+            "branch": {"branch_value": 13, "leaf": {"own": 17}},
+        }
+    )
+
+    leaf = final.branch.leaf
+    assert leaf.current_untyped == 17
+    assert leaf.current_typed == 17
+    assert leaf.parent_untyped == 13
+    assert leaf.parent_typed == 13
+    assert leaf.root_untyped == 11
+    assert leaf.root_typed == 7
+    assert leaf.grandparent_untyped == 7
+    assert leaf.grandparent_typed == 7
+    assert leaf.nearest_branch == 13
+    assert leaf.through_active_path == 17
 
 
-def test_direct_construction_semantics():
-    class SelfSufficient(C.Config):
-        dim: int = 64
-        run_name: str = C.interp(lambda c: f"run-d{c.self().dim}")
+def test_config_children_in_typed_lists_and_dicts_keep_parent_and_root_context():
+    class Item(C.Config):
+        value: int
+        from_parent: int = C.interp(lambda context: context.parent().scale)
+        from_typed_parent: int = C.interp(
+            lambda context: context.parent(Collection).scale
+        )
+        from_root: int = C.interp(lambda context: context.root().scale)
+        from_typed_root: int = C.interp(lambda context: context.root(Collection).scale)
 
-    # a marker reading only its own level resolves even standalone:
-    assert SelfSufficient(dim=128).run_name == "run-d128"
-    # explicit always works:
-    assert LNConfig(dim=7).dim == 7
-    # a marker needing ancestors fails loudly at direct construction (its own root):
-    with pytest.raises(ValidationError, match="no enclosing ModelConfig"):
-        LNConfig()
+    class Collection(C.Config):
+        scale: int
+        items: list[Item]
+        indexed: dict[str, Item]
+
+    first = Item.config_draft()
+    first.value = 1
+    second = Item.config_draft()
+    second.value = 2
+
+    work = Collection.config_draft()
+    work.scale = 9
+    work.items = [first]
+    work.indexed = {"second": second}
+
+    final = work.config_finalize()
+    assert not C.is_draft(final.items[0])
+    assert not C.is_draft(final.indexed["second"])
+    assert final.items[0].value == 1
+    assert final.indexed["second"].value == 2
+    for item in [final.items[0], final.indexed["second"]]:
+        assert item.from_parent == 9
+        assert item.from_typed_parent == 9
+        assert item.from_root == 9
+        assert item.from_typed_root == 9
 
 
-def test_nearest_disambiguates_per_subtree():
-    class Distill(C.Config):
-        teacher: ModelConfig
-        student: ModelConfig
+def test_model_validate_called_inside_a_resolver_starts_a_fresh_root():
+    class Independent(C.Config):
+        source: int
+        copied: int = C.interp(lambda context: context.root(Independent).source)
 
-    d = Distill.config_draft()
-    d.teacher.dim = 1024
-    d.student.dim = 256
-    f = C.finalize(d)
-    assert f.teacher.encoder.ln.dim == 1024
-    assert f.student.encoder.ln.dim == 256
+    class Outer(C.Config):
+        source: int
+        nested_result: int = C.interp(
+            lambda context: Independent.model_validate({"source": 11}).copied
+        )
+        stack_was_restored: int = C.interp(
+            lambda context: context.root(Outer).source + context.current().nested_result
+        )
+
+    final = Outer.model_validate({"source": 7})
+    assert final.nested_result == 11
+    assert final.stack_was_restored == 18
+
+
+def _raise_resolver_error(context: C.Context) -> int:
+    del context
+    raise RuntimeError("resolver exploded")
+
+
+def test_resolver_failure_has_a_structured_nested_path_and_callable_site():
+    class BrokenLeaf(C.Config):
+        value: int = C.interp(_raise_resolver_error)
+
+    class BrokenRoot(C.Config):
+        leaf: BrokenLeaf
+
+    with pytest.raises(ValidationError) as caught:
+        BrokenRoot.model_validate({"leaf": {}})
+
+    error = caught.value.errors(include_url=False)[0]
+    assert error["loc"] == ("leaf", "value")
+    assert error["type"] == "nshconfig_interpolation"
+    assert error["ctx"]["path"] == "leaf.value"
+    assert "_raise_resolver_error" in error["ctx"]["marker"]
+    assert "test_interp.py" in error["ctx"]["marker"]
+    assert error["ctx"]["error"] == "resolver exploded"
+
+    # A failed resolver must restore every ContextVar before the next validation.
+    assert BasicConfig(source=6).class_derived == 12

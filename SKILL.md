@@ -1,128 +1,166 @@
 ---
 name: using-nshconfig
-description: Build typed, provenance-aware Python configs with nshconfig v2 (Pydantic). Use when creating Config classes, composing drafts, wiring values with interp() interpolation (Hydra-style, in Python), finalizing to frozen configs, or tracing why a value was set with explain().
+description: Builds typed Python configuration with explicit nshconfig drafts, nested default templates, declaration-ordered interpolation, and normal Pydantic validation. Use when defining Config schemas, composing ML run settings, or finalizing drafts.
 ---
 
-# nshconfig v2
+# Using nshconfig
 
-Configuration library on Pydantic (>=2.13, Python >=3.10). Import as `import nshconfig as C`.
-One verb family and one value: `config_draft` / `config_finalize` / `config_thaw` /
-`config_explain` / `config_provenance` / `config_is_draft`, plus `C.interp(lambda c: ...)`.
-Module-level functional aliases (`C.finalize(cfg)`, `C.explain(cfg, path)`, ...) also exist.
+Treat [DESIGN.md](DESIGN.md) as the semantic authority. `nshconfig` is a small
+lifecycle layer over Pydantic, not a replacement for Pydantic authoring APIs.
 
-## Config classes
+## Canonical workflow
 
 ```python
+from pydantic import Field
+
 import nshconfig as C
 
-class OptimConfig(C.Config):
-    lr: float = 1e-3
-    weight_decay: float = 0.0
 
-class TrainConfig(C.Config):
-    optim: OptimConfig
-    steps: int            # required
+class Norm(C.Config):
+    dim: int = C.interp(lambda context: context.parent(Model).dim)
+
+
+class Model(C.Config):
+    dim: int = 768
+    norm: Norm = Field(default_factory=Norm.config_draft)
+
+
+class Run(C.Config):
+    seed: int
+    model: Model = Model()
+
+
+work = Run.config_draft()
+work.seed = 7
+work.model.dim = 1024
+final = work.config_finalize()
+
+assert final.model.norm.dim == 1024
+assert C.is_draft(work)
 ```
 
-`C.Config` is a pydantic BaseModel with `extra="forbid"`, `frozen=True` (finals are immutable
-and hashable), `strict=True`, `use_attribute_docstrings=True`, and `validate_default=True`.
-Leave nested config fields bare (`optim: OptimConfig`, no default): drafts auto-create them,
-and finalize fills untouched required subtrees. Set process-wide defaults before defining
-config classes with `C.set_model_config_defaults(arbitrary_types_allowed=True)`.
+## Lifecycle rules
 
-## Drafts and finalize
+- `ConfigType(...)` is ordinary Pydantic construction and returns a validated
+  final. Use `ConfigType.config_draft()` only for mutable composition.
+- `config_draft()` takes no input and skips validators, default factories,
+  private factories, and `model_post_init`.
+- Assign declared fields normally. Assignment is unvalidated. Deleting a field
+  reactivates its declared default, factory, interpolation, or missing state.
+- A required field with one concrete `Config` annotation auto-creates a child
+  draft on access. Other missing required fields and pending interpolation raise
+  `C.UnsetError` when read.
+- `draft.config_finalize()` recursively collects the declared Config graph and
+  returns a fresh final. It does not consume the draft. Calling it on a final
+  raises `C.DraftError`.
+- Draft copies and Pydantic or JSON serialization are rejected. Keep the original
+  draft when another variant is needed. Trusted pickle transport is a separate,
+  explicit mechanism.
+
+## Nested defaults
+
+A normal `Child(...)` final used as a field default is a template:
 
 ```python
-cfg = TrainConfig.config_draft()      # a REAL TrainConfig instance, mutable, unvalidated
-cfg.optim.lr = 1e-4            # nested configs auto-create on access; no ceremony
-cfg.steps = 10_000
-final = cfg.config_finalize()        # resolve interpolation -> validate ONCE -> frozen
+class Child(C.Config):
+    width: int = 128
+
+
+DEFAULT_CHILD = Child(width=256)
+
+
+class Parent(C.Config):
+    child: Child = DEFAULT_CHILD
+    stages: list[Child] = [Child(width=512)]
 ```
 
-- Helpers are plain functions mutating drafts (`def large(cfg): cfg.model.dim = 1024`); they
-  replace Hydra config groups.
-- `del cfg.optim.lr` re-arms the default (or interpolation rule). Last write wins.
-- finalize is idempotent and non-destructive: tweak the draft and finalize again (sweep loop).
-- `final.config_thaw()` gives a fresh draft seeded only from explicitly-set values, so interpolated
-  values re-derive after a tweak.
-- Drafts refuse `model_dump()` (loud `DraftError`); finals dump concrete values only.
-- Reading an unset/pending draft field raises `UnsetError`; typos raise with a did-you-mean.
+`Parent.config_draft()` projects the default-origin children above to fresh
+drafts. Projection recurses through concrete Config fields, unions, lists, tuples,
+mapping values, and TypedDict values. Mapping keys and set or frozenset members
+stay final because drafts are unhashable. A final explicitly assigned to a draft
+stays final.
 
-## Interpolation: `C.interp` is a value
+Templates retain a minimal raw-constructor recipe. A final created by
+`model_validate()`, changed through unchecked copy updates, or mutated after its
+recipe was captured is not a valid template. Do not rely on source inspection or
+factory-call analysis.
+
+Use `Field(default_factory=Child.config_draft)` when the child has interpolation
+that needs its parent. A direct `Child()` default must validate without a parent
+while the class body executes. Defaults and factories may run again when a
+template is realized, so keep them deterministic and free of external side
+effects.
+
+## Interpolation order
+
+`C.interp(fn)` occupies one whole field. Its `C.Context` supports `current()`,
+`parent()`, `root()`, and `nearest(ConfigType)`. Pass a Config class to a selector
+for statically checked field access.
+
+For each field, Pydantic chooses input or a default, nshconfig evaluates an
+interpolation marker, the complete native field pipeline validates the result,
+and only then is the canonical field visible to later interpolation. Model-before
+validators run before this sequence. Model-after validators and `model_post_init`
+run afterward with native Pydantic semantics.
+
+Context views prevent mutation through Config fields and supported built-in
+containers. A later field, the active field, and an incomplete ancestor branch are
+unavailable. Arbitrary user objects are opaque and retain their normal identity
+and behavior.
+
+An explicit value overrides an interpolation default. Deleting that draft value
+reactivates the marker. An interpolation marker is legal only as a complete Config
+field value, not inside a built-in container.
+
+## Pydantic rules and footguns
+
+- Import `Field`, `ConfigDict`, validators, serializers, and other authoring APIs
+  from `pydantic`.
+- Validation is strict by default. Project bases may change policy settings such
+  as strictness or `arbitrary_types_allowed`, but cannot disable lifecycle
+  settings or override reserved lifecycle methods.
+- Model-after validators may mutate or replace the result. This can make earlier
+  interpolation stale; nshconfig does not run a second pass.
+- `final.model_copy()` and `model_copy(update=...)` follow Pydantic. Updates are
+  not validated. Draft copies are rejected.
+- Revalidate concrete current values with
+  `type(final).model_validate(final)`. This does not replay old interpolation.
+- Finals are shallowly field-frozen. Mutable field contents remain mutable.
+- Drafts are unhashable. Finals use frozen-Pydantic field hashing and are
+  hashable exactly when their field values are hashable.
+- Config structure must have concrete annotations. Do not hide a Config in
+  `Any`, `object`, or an incompatible built-in container position. Ordinary user
+  objects are opaque and are not crawled for lifecycle values.
+- Do not use `from __future__ import annotations`. Quote only genuine forward
+  references. Eager annotations preserve notebook and cloudpickle behavior across
+  supported Python versions.
+
+## Project composition
+
+Reusable builders and finalized experiment files use the same mutator shape:
 
 ```python
-class LNConfig(C.Config):
-    dim: int = C.interp(lambda c: c.nearest(ModelConfig).dim)   # class default slot
+def resnet50(cfg: ModelConfig, *, d_model: int = 256) -> ModelConfig:
+    cfg.d_model = d_model
+    return cfg
+
+
+def __config__(cfg: TrainConfig) -> TrainConfig:
+    resnet50(cfg.model)
+    return cfg
 ```
 
-The SAME kind of value works at composition time (the Hydra move), per tree:
+Place reusable functions under `src/project/configs/` and root experiment files
+under `configs/`. The application creates the expected root draft, calls
+`__config__`, checks that it returned the same object, and finalizes once.
+`nshconfig` does not load files or maintain a registry.
 
-```python
-cfg.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)  # draft slot
-TrainConfig.model_validate({"optim": {"lr": C.interp(lambda c: c.root().steps / 100)}})
+## Verification
+
+```bash
+uv run pytest
+uv run basedpyright src
+uv run ruff check src tests
+uv run sphinx-build -W --keep-going -b html docs/source docs/build/html
+uv run nox -s tests
 ```
-
-The lambda receives a `Ctx`:
-
-- `c.self()` / `c.self(Cls)` -- own level (earlier-declared fields already resolved)
-- `c.parent()` / `c.parent(Cls)` -- one level up (Hydra `${..x}`), always resolved
-- `c.parent(n)` / `c.parent(n, Cls)` -- exactly `n` ancestor hops up
-- `c.root()` / `c.root(Cls)` -- the validation root (Hydra `${a.b}`), raw input + class defaults, incl. siblings
-- `c.nearest(Cls)` -- nearest enclosing `Cls` instance; ancestors only; survives refactors
-
-Passing a class gives typed field access and asserts that the selected frame is that class (or a
-subclass). Omitting the class keeps the selector dynamic and performs no type assertion.
-
-Rules: explicit values always beat interpolation (the lambda never runs if the field was
-provided). The lambda body is arbitrary pure Python (conditionals, arithmetic, f-strings over
-resolved values). Resolved values still pass field constraints (`Field(gt=0)` etc.).
-`interp()` composes with `Field`: `a: int = C.Field(default=C.interp(...), gt=0)`. nshconfig
-re-exports the useful Pydantic v2 config-authoring surface, so use `C.Field`,
-`C.field_validator`, `C.model_validator`, `C.TypeAdapter`, etc. in ordinary config modules.
-One pass: a marker reading a still-pending SIBLING value fails loudly (point both at the shared
-source instead). Markers refuse `bool()`/f-strings while pending; `==` on markers is identity.
-
-## Provenance: why did this run use that value?
-
-```python
-with C.source("sweep:lr"):       # optional semantic label
-    cfg.optim.lr = 1e-4
-
-print(final.config_explain("optim.lr"))
-# optim.lr = 0.0001
-#   set to 0.0001 at sweep.py:12 in <module>  [sweep:lr]   | cfg.optim.lr = 1e-4
-#   set to 0.0003 at configs/base.py:7 in base_config      | cfg.optim.lr = 3e-4
-#   class default: 0.001 (OptimConfig)
-```
-
-Every draft write records file:line, function, and source text automatically (helpers become
-provenance units). Interp events record the marker's site plus what it read ("because
-model.dim = 1024"). `cfg.config_provenance()` returns the full path -> events table. Works on drafts
-and finals; survives pickling.
-
-## Transport
-
-cloudpickle is the notebook-to-cluster channel: pending drafts (even with notebook-defined
-classes) round-trip and finalize on the far side. Plain pickle works for finals and for
-markers using named module-level functions (lambdas need cloudpickle). JSON is the run record:
-`final.model_dump_json()`; reload with `Cls.model_validate_json(...)`.
-
-## Failure model (all loud, all located)
-
-Orphan (`no enclosing ModelConfig (ancestors here: ...)`), cycles (both ends named), markers
-smuggled outside field slots (root sweep names the path), pending reads, draft dumps, and
-resolver exceptions are all `ValidationError`/`UnsetError`/`DraftError` carrying the dotted
-path, owning `Cls.field`, and the lambda's `file:line` site.
-
-## Rules for generated code
-
-- Do NOT use `from __future__ import annotations` (the library does not): annotations are
-  eager, matching notebook semantics and pydantic's resolution; quote forward references
-  explicitly (`def helper(cfg: "TrainConfig")`).
-- Type checker: basedpyright. The lambda's RETURN type is checked at both slots; the lambda
-  body is dynamically typed (`c` navigations return Any), like pydantic's `default_factory`.
-- Verb names: a user field named exactly `config_finalize` (etc.) takes full priority and
-  the method vanishes for that class; module verbs (`C.finalize`) always work. `config_*`
-  fields like `config_name` are NOT policed: no warnings, ever.
-- Direct construction does not see ancestors: `LNConfig()` with an ancestor-needing rule fails
-  loudly; use the draft path or pass the value explicitly.

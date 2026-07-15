@@ -1,150 +1,332 @@
-"""The interpolation value: ``interp()`` markers, and the ``Ctx`` they resolve against.
-
-An ``Interp`` marker is an ordinary value: nothing special happens at class
-definition. It is legal anywhere a value sits (a draft assignment, a
-``model_validate`` input dict, a class default, ``Field(default=...)``) and
-resolves through one rule inside the validation pass (see ``scope.py``).
-"""
+"""Python interpolation markers and the read-only validation context."""
 
 import difflib
+import keyword
+from collections.abc import Iterator, Sequence
 from contextvars import ContextVar
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, TypeAlias, TypeVar, cast, overload
+from typing import Any, Callable, TypeVar, cast, overload
 
 from pydantic import BaseModel
+
+from .state import is_path_part
 from typing_extensions import override
 
-__all__ = ["Ctx", "Interp", "interp"]
+from .errors import DraftError
+
+__all__ = ["Context", "interp"]
 
 T = TypeVar("T")
 M = TypeVar("M", bound=BaseModel)
-
-# stack entry: (model class, in-progress input dict, key label in parent or None)
-StackEntry: TypeAlias = "tuple[type[BaseModel], dict[str, Any], str | None]"
-Stack: TypeAlias = "tuple[StackEntry, ...]"
-
-# Read-log recorder: while a marker's fn runs, _View reads append (dotted path, value
-# repr) here so provenance can answer "derived BECAUSE x = v". Inactive (None) outside
-# resolution; activated by the scope validator.
-_READS: ContextVar[list[tuple[str, str]] | None] = ContextVar("nshconfig_reads", default=None)
+PathPart = str | int
 
 
+@dataclass(frozen=True)
+class _ModelPath:
+    path: tuple[PathPart, ...]
+
+
+_MODEL_PATHS: ContextVar[dict[int, _ModelPath] | None] = ContextVar(
+    "nshconfig_interpolation_model_paths", default=None
+)
+
+
+@dataclass(frozen=True, slots=True, eq=False)
 class Interp:
-    """Runtime marker: this value is interpolated from the config tree at validation.
+    """A pending callable stored as a field value until Pydantic validates it."""
 
-    Stateless after construction (fn + captured source site), so one instance can
-    occupy a class default slot and any number of instance slots concurrently.
-    ``==`` is identity (raising would break container membership); ``bool()`` and
-    f-string formatting raise so a pending marker cannot silently leak into data.
-    """
+    fn: "Callable[[Context], Any]"
+    site: str = field(init=False)
 
-    __slots__ = ("fn", "site")
-
-    def __init__(self, fn: "Callable[[Ctx], Any]"):
-        self.fn = fn
-        code = getattr(fn, "__code__", None)
-        name = getattr(fn, "__name__", type(fn).__name__)
-        # Plain string captured NOW: survives pickling, citable on a cluster.
-        self.site = f"{name} @ {code.co_filename}:{code.co_firstlineno}" if code else name
+    def __post_init__(self) -> None:
+        code = getattr(self.fn, "__code__", None)
+        name = getattr(
+            self.fn,
+            "__qualname__",
+            getattr(self.fn, "__name__", type(self.fn).__name__),
+        )
+        object.__setattr__(
+            self,
+            "site",
+            f"{name} @ {code.co_filename}:{code.co_firstlineno}"
+            if code is not None
+            else name,
+        )
 
     @override
     def __repr__(self) -> str:
-        name, _, loc = self.site.partition(" @ ")
-        if loc:
-            file, _, line = loc.rpartition(":")
-            return f"interp(<{name} @ {Path(file).name}:{line}>)"
-        return f"interp(<{name}>)"
+        name, separator, location = self.site.partition(" @ ")
+        if not separator:
+            return f"interp(<{name}>)"
+        filename, _, line = location.rpartition(":")
+        return f"interp(<{name} @ {Path(filename).name}:{line}>)"
 
     def __bool__(self) -> bool:
-        from .errors import DraftError
-
-        raise DraftError(f"refusing to use pending {self!r} in a boolean context")
+        raise DraftError(f"pending {self!r} cannot be used as a boolean")
 
     @override
-    def __format__(self, spec: str) -> str:
-        from .errors import DraftError
-
-        raise DraftError(f"refusing to format pending {self!r} into a string")
+    def __format__(self, format_spec: str) -> str:
+        raise DraftError(f"pending {self!r} cannot be formatted")
 
 
-def interp(fn: "Callable[[Ctx], T]") -> T:
-    """Mark a field value as interpolated from the surrounding config tree.
-
-    Returns an ``Interp`` marker at runtime; typed as ``T`` (the same contained lie
-    as pydantic's ``Field()``) so basedpyright checks the lambda's return type
-    against the field at every use site.
-    """
+def interp(fn: "Callable[[Context], T]") -> T:
+    """Derive one complete Config field value from its validation context."""
+    if not callable(fn):
+        raise TypeError("interp() requires a callable")
     return cast(T, Interp(fn))
 
 
-class _View:
-    """Read access to one stack level: resolved/provided input first, class defaults second."""
+def _render_path(parts: Sequence[PathPart]) -> str:
+    rendered = ""
+    for part in parts:
+        if isinstance(part, int):
+            rendered += f"[{part}]"
+        elif part.isidentifier() and not keyword.iskeyword(part):
+            rendered += ("." if rendered else "") + part
+        else:
+            rendered += f"[{part!r}]"
+    return rendered or "<root>"
 
-    __slots__ = ("_cls", "_data", "_path")
 
-    def __init__(self, cls: type[BaseModel], data: dict[str, Any], path: str = ""):
-        object.__setattr__(self, "_cls", cls)
-        object.__setattr__(self, "_data", data)
+def _safe_repr(value: Any, *, limit: int = 80) -> str:
+    try:
+        rendered = repr(value)
+    except Exception:
+        rendered = f"<{type(value).__qualname__}>"
+    if len(rendered) <= limit:
+        return rendered
+    return f"{rendered[: max(0, limit - 3)]}..."
+
+
+def _path_part(value: Any) -> PathPart:
+    return value if is_path_part(value) else _safe_repr(value)
+
+
+def _publish(
+    value: Any,
+    path: tuple[PathPart, ...],
+) -> Any:
+    if isinstance(value, BaseModel):
+        from .config import Config
+
+        if isinstance(value, Config):
+            _register_model(value, path)
+        return value
+    if type(value) in {dict, list, tuple, set, frozenset}:
+        return _ContainerView(value, path)
+    return value
+
+
+def _register_model(value: BaseModel, path: tuple[PathPart, ...]) -> None:
+    """Associate a concrete Config with its canonical path for transparent reads."""
+
+    model_paths = _MODEL_PATHS.get()
+    if model_paths is not None:
+        model_paths[id(value)] = _ModelPath(path)
+
+
+def record_model_field_read(model: BaseModel, name: str, value: Any) -> Any:
+    """Apply read-only views to nested values read during interpolation."""
+    model_paths = _MODEL_PATHS.get()
+    if model_paths is None or (model_path := model_paths.get(id(model))) is None:
+        return value
+    path = (*model_path.path, name)
+    return _publish(value, path)
+
+
+class _ContainerView:
+    """Read-only container access with ordinary Python operations."""
+
+    __slots__ = ("_path", "_value")
+
+    def __init__(
+        self,
+        value: dict[Any, Any] | list[Any] | tuple[Any, ...] | set[Any] | frozenset[Any],
+        path: tuple[PathPart, ...],
+    ):
+        object.__setattr__(self, "_value", value)
         object.__setattr__(self, "_path", path)
+
+    @staticmethod
+    def _unwrap_other(value: Any) -> Any:
+        return value._value if isinstance(value, _ContainerView) else value
+
+    def _publish_result(self, value: Any) -> Any:
+        return _publish(value, self._path)
+
+    def __getitem__(self, key: Any) -> Any:
+        value = self._value[key]
+        return _publish(
+            value,
+            (*self._path, _path_part(key)),
+        )
+
+    def __iter__(self) -> Iterator[Any]:
+        if type(self._value) is dict:
+            return iter(self._value)
+        return (
+            _publish(
+                value,
+                (*self._path, index),
+            )
+            for index, value in enumerate(self._value)
+        )
+
+    def __contains__(self, item: Any) -> bool:
+        return item in self._value
+
+    def __len__(self) -> int:
+        return len(self._value)
+
+    def __bool__(self) -> bool:
+        return bool(self._value)
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        if type(self._value) is not dict:
+            raise AttributeError("get")
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def keys(self) -> Iterator[Any]:
+        if type(self._value) is not dict:
+            raise AttributeError("keys")
+        return iter(tuple(self._value.keys()))
+
+    def values(self) -> Iterator[Any]:
+        if type(self._value) is not dict:
+            raise AttributeError("values")
+        return (
+            self._publish_mapping_value(key, value)
+            for key, value in tuple(self._value.items())
+        )
+
+    def items(self) -> Iterator[tuple[Any, Any]]:
+        if type(self._value) is not dict:
+            raise AttributeError("items")
+        return (
+            (key, self._publish_mapping_value(key, value))
+            for key, value in tuple(self._value.items())
+        )
+
+    def _publish_mapping_value(self, key: Any, value: Any) -> Any:
+        return _publish(
+            value,
+            (*self._path, _path_part(key)),
+        )
+
+    def index(self, value: Any, start: int = 0, stop: int | None = None) -> int:
+        if type(self._value) is dict:
+            raise AttributeError("index")
+        length = len(self._value)
+        normalized_start, normalized_stop, _ = slice(start, stop).indices(length)
+        for index in range(normalized_start, normalized_stop):
+            if self[index] == value:
+                return index
+        raise ValueError(f"{value!r} is not in {type(self._value).__name__}")
+
+    def count(self, value: Any) -> int:
+        if type(self._value) is dict:
+            raise AttributeError("count")
+        return sum(item == value for item in self)
+
+    def __getattr__(self, name: str) -> Any:
+        raise AttributeError(
+            f"{name!r} is unavailable on the read-only interpolation container view"
+        )
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        return self._value == self._unwrap_other(other)
+
+    @override
+    def __ne__(self, other: object) -> bool:
+        return not self == other
+
+    def __add__(self, other: Any) -> Any:
+        return self._publish_result(self._value + self._unwrap_other(other))
+
+    def __radd__(self, other: Any) -> Any:
+        return self._publish_result(self._unwrap_other(other) + self._value)
+
+    def __mul__(self, other: Any) -> Any:
+        return self._publish_result(self._value * other)
+
+    def __rmul__(self, other: Any) -> Any:
+        return self._publish_result(other * self._value)
+
+    def __or__(self, other: Any) -> Any:
+        return self._publish_result(self._value | self._unwrap_other(other))
+
+    def __ror__(self, other: Any) -> Any:
+        return self._publish_result(self._unwrap_other(other) | self._value)
+
+    @override
+    def __repr__(self) -> str:
+        return repr(self._value)
+
+    @override
+    def __str__(self) -> str:
+        return str(self._value)
+
+    @override
+    def __format__(self, format_spec: str) -> str:
+        return format(self._value, format_spec)
+
+
+class _FrameView:
+    __slots__ = ("_frame",)
+
+    def __init__(self, frame: Any):
+        object.__setattr__(self, "_frame", frame)
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
-        f = self._cls.__pydantic_fields__.get(name)
-        if f is None:
-            hint = difflib.get_close_matches(name, self._cls.__pydantic_fields__, n=1)
+        frame = object.__getattribute__(self, "_frame")
+        fields = frame.cls.__pydantic_fields__
+        if name not in fields:
+            hint = difflib.get_close_matches(name, fields, n=1)
+            suffix = f"; did you mean {hint[0]!r}?" if hint else ""
+            raise AttributeError(f"{frame.cls.__name__} has no field {name!r}{suffix}")
+        if name not in frame.values:
+            child = frame.active_child
+            if child is not None and child.path == (*frame.path, name):
+                return _FrameView(child)
+            path = _render_path((*frame.path, name))
             raise AttributeError(
-                f"{self._cls.__name__} has no field {name!r}"
-                + (f"; did you mean {hint[0]!r}?" if hint else "")
+                f"{path} has not been validated yet; declare the source field or "
+                "completed branch before the field that reads it"
             )
-        if name in self._data:
-            v = self._data[name]
-            if isinstance(v, Interp):
-                raise AttributeError(
-                    f"{self._cls.__name__}.{name} is itself pending interpolation ({v!r}) "
-                    "(possible cycle; set a concrete value, or point both at the same "
-                    "concrete source)"
-                )
-        elif isinstance(f.default, Interp):
-            raise AttributeError(
-                f"{self._cls.__name__}.{name} is itself interpolated and not filled yet"
-            )
-        elif not f.is_required():
-            data = {k: v for k, v in self._data.items() if not isinstance(v, Interp)}
-            v = f.get_default(call_default_factory=True, validated_data=data)
-        else:
-            raise AttributeError(
-                f"{self._cls.__name__}.{name}: not provided and no usable default"
-            )
-        dotted = f"{self._path}.{name}" if self._path else name
-        ann = f.annotation
-        if isinstance(v, dict) and isinstance(ann, type) and issubclass(ann, BaseModel):
-            return _View(ann, v, dotted)
-        if (reads := _READS.get()) is not None:
-            reads.append((dotted, repr(v)[:60]))
-        return v
+        return _publish(
+            frame.values[name],
+            (*frame.path, name),
+        )
 
     @override
     def __repr__(self) -> str:
-        return f"<view {self._cls.__name__} {self._data!r}>"
+        frame = object.__getattribute__(self, "_frame")
+        return f"<validation view of {frame.cls.__name__}>"
 
 
-class Ctx:
-    """What an interp lambda sees. All navigations return attribute-access views."""
+class Context:
+    """Read-only access to canonical values already validated in this config tree."""
 
     __slots__ = ("_stack",)
 
-    def __init__(self, stack: Stack):
+    def __init__(self, stack: tuple[Any, ...]):
         self._stack = stack
 
     @overload
-    def self(self) -> Any: ...
+    def current(self) -> Any: ...
 
     @overload
-    def self(self, cls: type[M]) -> M: ...
+    def current(self, cls: type[M]) -> M: ...
 
-    def self(self, cls: type[M] | None = None) -> Any:
-        """This model's own level; pass a class for typed field access."""
+    def current(self, cls: type[M] | None = None) -> Any:
+        """Return the model whose field is currently being validated."""
         return self._view_at(len(self._stack) - 1, cls)
 
     @overload
@@ -162,24 +344,21 @@ class Ctx:
     def parent(
         self, levels_or_cls: int | type[M] = 1, cls: type[M] | None = None
     ) -> Any:
-        """An ancestor frame; pass a class for typed field access."""
+        """Return an ancestor by exact hop count, optionally checking its class."""
         if isinstance(levels_or_cls, int):
             levels = levels_or_cls
             expected = cls
         else:
             if cls is not None:
-                raise AttributeError("parent(Cls) does not accept a second class")
+                raise AttributeError("parent(Model) does not accept a second class")
             levels = 1
             expected = levels_or_cls
         if levels < 1:
-            raise AttributeError("parent() levels must be >= 1")
+            raise AttributeError("parent() levels must be at least 1")
         index = len(self._stack) - 1 - levels
         if index < 0:
-            if levels == 1:
-                raise AttributeError("no parent: this model is the validation root")
-            chain = " > ".join(c.__name__ for c, _, _ in self._stack)
             raise AttributeError(
-                f"no ancestor {levels} levels up (ancestors here: {chain})"
+                f"no ancestor exists {levels} level(s) above this model"
             )
         return self._view_at(index, expected)
 
@@ -190,28 +369,103 @@ class Ctx:
     def root(self, cls: type[M]) -> M: ...
 
     def root(self, cls: type[M] | None = None) -> Any:
-        """The validation root; pass a class for typed field access."""
+        """Return the root model of this validation session."""
         return self._view_at(0, cls)
 
     def nearest(self, cls: type[M]) -> M:
-        """The nearest enclosing instance of ``cls`` (ancestors only, nominal)."""
-        for i in range(len(self._stack) - 2, -1, -1):
-            c, d, _ = self._stack[i]
-            if issubclass(c, cls):
-                return cast(M, _View(c, d, _dotted_prefix(self._stack[: i + 1])))
-        chain = " > ".join(c.__name__ for c, _, _ in self._stack)
-        raise AttributeError(f"no enclosing {cls.__name__} (ancestors here: {chain})")
+        """Return the nearest enclosing ancestor compatible with ``cls``."""
+        for frame in reversed(self._stack[:-1]):
+            if issubclass(frame.cls, cls):
+                return cast(M, _FrameView(frame))
+        chain = " > ".join(frame.cls.__name__ for frame in self._stack)
+        raise AttributeError(f"no enclosing {cls.__name__}; active models: {chain}")
 
-    def _view_at(self, index: int, cls: type[M] | None = None) -> Any:
-        actual, data, _ = self._stack[index]
-        if cls is not None and not issubclass(actual, cls):
-            chain = " > ".join(c.__name__ for c, _, _ in self._stack)
+    def _view_at(self, index: int, cls: type[M] | None) -> Any:
+        frame = self._stack[index]
+        if cls is not None and not issubclass(frame.cls, cls):
             raise AttributeError(
-                f"expected {cls.__name__} at {actual.__name__} frame "
-                f"(ancestors here: {chain})"
+                f"expected {cls.__name__}, found {frame.cls.__name__} at that context level"
             )
-        return _View(actual, data, _dotted_prefix(self._stack[: index + 1]))
+        return _FrameView(frame)
 
 
-def _dotted_prefix(stack: Stack) -> str:
-    return ".".join(lbl for _, _, lbl in stack if lbl is not None)
+def unwrap_view(value: Any) -> Any:
+    """Materialize a result without leaking proxies or source-owned containers."""
+    return _materialize_result(value, "<result>", set(), {})
+
+
+def _materialize_result(
+    value: Any,
+    path: str,
+    active: set[int],
+    memo: dict[int, Any],
+) -> Any:
+    if isinstance(value, _ContainerView):
+        return _materialize_container(value._value, path, active, memo)
+    if isinstance(value, _FrameView):
+        raise AttributeError(
+            "an active Config branch is not a completed value while it is still "
+            "being validated; select one of its already validated fields instead"
+        )
+    if isinstance(value, BaseModel):
+        return value
+    if type(value) in {dict, list, tuple, set, frozenset}:
+        return _materialize_container(value, path, active, memo)
+    return value
+
+
+def _materialize_container(
+    value: Any,
+    path: str,
+    active: set[int],
+    memo: dict[int, Any],
+) -> Any:
+    identity = id(value)
+    if identity in active:
+        raise AttributeError(f"interpolation result contains a cycle at {path}")
+    if identity in memo:
+        return memo[identity]
+    active.add(identity)
+    try:
+        if type(value) is dict:
+            output: dict[Any, Any] = {}
+            memo[identity] = output
+            for key, item in value.items():
+                copied_key = _materialize_result(key, f"{path}.<key>", active, memo)
+                copied_item = _materialize_result(
+                    item, f"{path}[{_safe_repr(key)}]", active, memo
+                )
+                output[copied_key] = copied_item
+            return output
+        if type(value) is list:
+            output_list: list[Any] = []
+            memo[identity] = output_list
+            output_list.extend(
+                _materialize_result(item, f"{path}[{index}]", active, memo)
+                for index, item in enumerate(value)
+            )
+            return output_list
+        if type(value) is tuple:
+            output_tuple = tuple(
+                _materialize_result(item, f"{path}[{index}]", active, memo)
+                for index, item in enumerate(value)
+            )
+            memo[identity] = output_tuple
+            return output_tuple
+        if type(value) is set:
+            output_set: set[Any] = set()
+            memo[identity] = output_set
+            output_set.update(
+                _materialize_result(item, f"{path}[{index}]", active, memo)
+                for index, item in enumerate(value)
+            )
+            return output_set
+        assert type(value) is frozenset
+        output_frozen = frozenset(
+            _materialize_result(item, f"{path}[{index}]", active, memo)
+            for index, item in enumerate(value)
+        )
+        memo[identity] = output_frozen
+        return output_frozen
+    finally:
+        active.remove(identity)

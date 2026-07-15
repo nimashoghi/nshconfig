@@ -1,83 +1,76 @@
 # Interpolation
 
-`C.interp(lambda c: ...)` returns a **value** (an `Interp` marker) that resolves against the
-config tree during validation. Because it is just a value, one concept covers everything
-Hydra/OmegaConf split across class-level defaults and composition-time interpolation:
+`C.interp(fn)` stores a callable as one complete field value. The callable receives
+a read-only `C.Context` and returns input for that field's ordinary Pydantic
+pipeline.
 
 ```python
-class LNConfig(C.Config):
-    dim: int = C.interp(lambda c: c.nearest(ModelConfig).dim)   # class default slot
-
-cfg.model.encoder.ln.dim = C.interp(lambda c: ...)              # draft assignment
-TrainConfig.model_validate({"model": {"dim": C.interp(lambda c: c.root().width)}})  # dict input
-a: int = C.Field(default=C.interp(lambda c: ...), gt=0)         # inside Field metadata
+class Schedule(C.Config):
+    warmup: int = 100
+    total: int = 1000
+    decay_steps: int = C.interp(
+        lambda context: context.current(Schedule).total
+        - context.current(Schedule).warmup
+    )
 ```
 
-Nothing special happens at class definition: pydantic stores the marker verbatim in the
-default slot, exactly like `= 32`. The single resolution rule, per field in declaration order:
-`value.get(name, field.default)`; if that is a marker, call it with a `Ctx`. An instance
-marker is found *at* the key; a class-level marker is the same kind of object found in the
-default slot when the key is absent.
+## Declaration order
 
-## The Ctx API
+Field declaration order is dependency order. For each field:
 
-| Accessor | Hydra equivalent | Sees |
-|---|---|---|
-| `c.self()` / `c.self(Cls)` | same level | own fields; earlier-declared markers already resolved |
-| `c.parent()` / `c.parent(Cls)` | `${..x}` | one level up; ancestor frames are always resolved |
-| `c.parent(n)` / `c.parent(n, Cls)` | `${...x}` | exactly `n` ancestor hops up |
-| `c.root()` / `c.root(Cls)` | `${a.b}` | the validation root; raw input + class defaults, incl. sibling subtrees |
-| `c.nearest(Cls)` | (no equivalent) | nearest enclosing `Cls` instance, ancestors only |
+1. Pydantic chooses explicit input, a default, or a factory result.
+2. nshconfig evaluates an interpolation marker if present.
+3. The complete native field pipeline validates the result.
+4. The canonical value becomes visible to later fields.
 
-Passing a class gives typed field access and asserts at runtime that the selected frame is that
-class or a subclass. Omitting the class keeps the selector dynamic and performs no type
-assertion.
+A field validator can normalize a source before interpolation reads it. The
+derived field then runs its own validators exactly once. Reading the active field
+or a later field fails with the target path.
 
-Prefer `c.nearest(SomeConfig)` over positional forms when the dependency is semantic rather
-than structural: it survives restructuring (nest a subtree one level deeper and nothing
-breaks) and disambiguates repeated classes (in a teacher/student tree, each LN binds to *its*
-model). Views support attribute access only; everything they return is plain Python, so the
-lambda body is ordinary pure Python: arithmetic, conditionals, `min`/`max`, f-strings over
-resolved values.
+Model-before validators run before field sequencing and may transform the input
+with native Pydantic semantics. `model_post_init` and model-after validators run
+after interpolation. They may mutate or replace results, so they can intentionally
+make an earlier relationship stale. nshconfig does not run a second pass.
 
-## Precedence: one rule
+## Context selectors
 
-Explicit always beats interpolation, mechanically (input-slot presence beats the default
-slot). Spelled out:
+- `context.current()` returns the active Config view.
+- `context.parent()` returns an ancestor by hop count.
+- `context.root()` returns the validation root.
+- `context.nearest(ConfigType)` finds the nearest compatible enclosing Config.
 
-| rung | source |
-|---|---|
-| 1 | concrete user value (write, kwarg, dict) |
-| 2 | marker as user value (instance slot) |
-| 3 | marker as class default |
-| 4 | static default / default_factory |
-| 5 | required and absent: missing error |
-
-Last write wins among user writes; `del` re-arms the rung below; markers may satisfy required
-fields; resolved values still pass field constraints (`gt=0` and friends), so interpolation
-feeds validation rather than bypassing it.
-
-## Ordering and the one-pass rule
-
-Each scope resolves *before* descending, so ancestor reads (`c.parent()`, `c.parent(n)`,
-`c.nearest(...)`) always
-see resolved values, and same-level chains work in declaration order. Dotted descent from
-`c.root()` sees raw input plus static class defaults: a sibling value that is *itself* still
-pending fails loudly with both ends named, rather than resolving lazily. Point both fields at
-the shared source instead:
+Passing a Config class to `current`, `parent`, or `root` exposes typed fields to a
+static checker:
 
 ```python
-cfg.a.x = C.interp(lambda c: c.root().width)   # not: c.root().b.y where b.y is also pending
-cfg.b.y = C.interp(lambda c: c.root().width)
+copied: int = C.interp(lambda context: context.parent(Model).dim)
 ```
 
-One pass, no lazy re-entry: a finalized value can never depend on evaluation order invisibly,
-and cycles are impossible to construct silently.
+Nested validation maintains the root-to-current stack. A completed earlier branch
+is visible to later siblings. An ancestor branch still being constructed is not a
+completed value, but its already validated fields may be selected.
 
-## Marker hygiene
+## Read-only values
 
-Pending markers refuse to be data: `bool(marker)` and f-strings raise, arithmetic raises, and
-a root-level sweep rejects any marker that survives validation outside a declared field slot
-(for example, smuggled inside a list under an `Any` field) with its exact path. The one
-documented sharp edge: `==` on markers is identity, so two distinct markers compare unequal
-rather than raising.
+Config fields, ordinary Pydantic models, mappings, lists, tuples, sets, and
+frozensets are exposed through read-only behavior during interpolation. Returning
+a container view materializes an independent built-in value graph. Returning an
+active Config branch itself is rejected because it is incomplete.
+
+Arbitrary user objects are opaque. nshconfig does not copy, crawl, or proxy their
+internal state, so they retain normal identity and behavior. Keep interpolation
+callables deterministic and avoid mutating opaque objects.
+
+## Overrides and structural positions
+
+Explicit field input overrides an interpolation default. Deleting the explicit
+value from a draft reactivates the marker.
+
+An interpolation marker is legal only as a complete Config field value. A marker
+inside a list, tuple, mapping, set, or frozenset is rejected with its structural
+path. A string-discriminated union's discriminator must be concrete before branch
+selection.
+
+Config values used by interpolation or draft collection need concrete structural
+annotations. Do not hide them under `Any`, `object`, or an incompatible union
+branch.

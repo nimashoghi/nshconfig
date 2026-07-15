@@ -1,13 +1,13 @@
 [project]
 name = "nshconfig"
-version = "2.0.0a4"
-description = "Typed, provenance-aware configuration for ML runs: drafts, interpolation, one validation boundary. Powered by Pydantic."
+version = "2.2.0a0"
+description = "Typed Python configuration for ML runs with explicit drafts and validated interpolation."
 authors = [{ name = "Nima Shoghi", email = "nimashoghi@gmail.com" }]
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.10,<4.0"
-dependencies = ["pydantic>=2.13", "typing-extensions"]
+dependencies = ["pydantic>=2.13,<3", "typing-extensions"]
 keywords = [
     "config",
     "configuration",
@@ -15,7 +15,6 @@ keywords = [
     "hyperparameters",
     "machine-learning",
     "interpolation",
-    "provenance",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -26,12 +25,13 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Typing :: Typed",
 ]
 
 [project.optional-dependencies]
 treescope = ["treescope"]
-docs = ["sphinx", "sphinx-rtd-theme", "myst-parser", "sphinx-copybutton"]
+transport = ["cloudpickle>=3.1.2"]
 
 [project.urls]
 homepage = "https://github.com/nimashoghi/nshconfig"
@@ -40,26 +40,27 @@ repository = "https://github.com/nimashoghi/nshconfig"
 
 [dependency-groups]
 dev = [
-    "basedpyright",
+    "basedpyright==1.36.2",
     "treescope",
     "ruff",
     "pytest",
     "pytest-cov",
     "nox",
     "packaging",
-    "cloudpickle",
+    "cloudpickle>=3.1.2",
     "ipykernel",
     "sphinx",
     "sphinx-rtd-theme",
     "myst-parser",
     "sphinx-copybutton",
+    "twine",
 ]
 
 [tool.uv]
 constraint-dependencies = ["urllib3>=2.6.3"]
 
 [build-system]
-requires = ["uv_build>=0.9.18,<0.10.0"]
+requires = ["uv_build>=0.11.28,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.basedpyright]

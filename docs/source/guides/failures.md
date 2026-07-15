@@ -1,25 +1,50 @@
-# Failure model
+# Failures and diagnostics
 
-Every degradation is loud and names its location: the dotted instance path, the owning
-`Cls.field`, and (for interpolation) the lambda's `file:line` site captured at construction.
-There is no silent third outcome: `finalize` returns values consistent with every rule, or it
-raises.
+Let lifecycle and Pydantic errors surface at their natural boundary:
 
-| Failure | When | The message carries |
-|---|---|---|
-| Orphan: `c.nearest(Cls)` finds no enclosing `Cls`; `c.parent()` at a root; `c.parent(n)` climbs past the root | finalize / any validation | `cannot interpolate ln.dim [LNConfig.dim = interp(<fn @ file:line>)]: no enclosing ModelConfig (ancestors here: EncoderConfig > LNConfig)` |
-| Typed selector mismatch, e.g. `c.root(TrainConfig)` on a different root | finalize / any validation | the expected class, actual frame class, and ancestor chain |
-| Cycle: mutual markers across subtrees; self-reference | finalize | one `ValidationError` with *both ends* as entries, each naming the other's pending marker |
-| Reading a still-pending sibling via `c.root()` | finalize | "is itself pending interpolation (...) (possible cycle; set a concrete value, or point both at the same concrete source)" |
-| Marker outside a declared field slot (e.g. inside a list under `Any`) | root sweep after validation | the exact path: `leaked into the final at Meta.meta[0]` |
-| Reading a pending/unset field on a draft | compose time | `UnsetError` with the path; "read it after finalize()" for interpolated fields |
-| Using a pending marker as data (`bool`, f-string, arithmetic) | compose time | `DraftError`/`TypeError` naming the marker and site |
-| Dumping a draft | compose time | `DraftError: drafts are not serializable; finalize() first` |
-| Resolver raised (any exception in the lambda) | finalize | wrapped with the dotted path and site |
-| Resolved value violates field constraints | finalize | pydantic's ordinary constraint error on the derived field |
-| Required field nobody set | finalize | pydantic's per-leaf missing error (`model.encoder.ln.dim`, not `model`) |
-| Typo'd draft write | compose time | `AttributeError` with a did-you-mean; also a static basedpyright error |
+| Error | Meaning |
+| --- | --- |
+| `UnsetError` | A draft field was read before it had a usable value |
+| `DraftError` | A draft was copied or sent through Pydantic serialization, or a final was finalized again |
+| Pydantic `ValidationError` | Final input, interpolation output, or a structural Config position was invalid |
+| `TypeError` | A Config class disabled a lifecycle invariant or declared an unsupported schema shape |
+| `AttributeError` | A draft write used an unknown field or interpolation read unavailable context |
 
-Two failure modes are *impossible by construction* rather than detected: infinite resolution
-loops (there is no recursive resolution; pending reads raise immediately, and that is the
-cycle detector) and symbolic values inside finalized dumps (the root sweep guarantees it).
+## Missing draft values
+
+Required scalar reads fail immediately. Required direct Config fields create a
+child draft, but a recursive required spine without a base case fails rather than
+recursing forever. Pending interpolation can be assigned and finalized but cannot
+be read from a draft.
+
+## Interpolation failures
+
+Interpolation errors report the target path and callable site. Common causes are:
+
+- reading a later field;
+- selecting an ancestor above the current root;
+- requesting the wrong typed context model;
+- returning an active incomplete branch;
+- mutating a read-only built-in container view;
+- raising inside the user callable.
+
+Reorder source fields before dependent fields. Use `Field(default_factory=Child.config_draft)`
+when a default child needs parent context.
+
+## Structural graph failures
+
+Draft collection follows concrete annotations through Config fields and supported
+built-in containers. A Config under `Any`, `object`, a wrong union branch, or an
+incompatible tuple or mapping position is rejected. Markers inside built-in
+containers are also rejected.
+
+Arbitrary user objects are opaque and are not crawled for drafts or markers. If
+such an object needs lifecycle-aware children, move those children into directly
+annotated Config fields.
+
+## Native Pydantic footguns
+
+`model_copy(update=...)` does not validate updates. Model-after validators and
+`model_post_init` may mutate values after interpolation. Shallowly frozen finals
+may still have mutable container contents. Revalidate current concrete values with
+`type(final).model_validate(final)` when needed.

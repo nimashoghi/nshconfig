@@ -1,112 +1,115 @@
 # Quickstart
 
-The whole user-facing vocabulary is one verb family and one value:
-`config_draft` / `config_finalize` / `config_thaw` / `config_explain` / `config_provenance` /
-`config_is_draft`, plus `C.interp(lambda c: ...)`. Module-level functional aliases
-(`C.finalize(cfg)`, `C.explain(cfg, path)`, ...) exist for functional style.
+## Define Pydantic schemas
 
-## Define configs
+Import Pydantic authoring APIs from Pydantic and subclass `C.Config`:
 
 ```python
-# myproj/configs.py
+from pydantic import Field
+
 import nshconfig as C
 
 
-class LNConfig(C.Config):
-    dim: int = 32                  # plain default
-    eps: float = C.Field(default=1e-5, gt=0)
+class Optimizer(C.Config):
+    learning_rate: float = Field(default=3e-4, gt=0)
 
 
-class EncoderConfig(C.Config):
-    ln: LNConfig                   # leave nested config fields bare
+class Norm(C.Config):
+    dim: int = C.interp(lambda context: context.parent(Model).dim)
 
 
-class HeadConfig(C.Config):
-    # class-level interpolation: a value sitting in the default slot
-    dim: int = C.interp(lambda c: c.nearest(ModelConfig).dim)
-
-
-class ModelConfig(C.Config):
+class Model(C.Config):
     dim: int = 768
-    encoder: EncoderConfig
-    head: HeadConfig
+    norm: Norm = Field(default_factory=Norm.config_draft)
 
 
-class TrainConfig(C.Config):
-    batch: int = 8
-    model: ModelConfig
-
-    @C.field_validator("batch")
-    @classmethod
-    def positive_batch(cls, value: int) -> int:
-        if value <= 0:
-            raise ValueError("batch must be positive")
-        return value
-
-
-def large(cfg: TrainConfig) -> None:
-    """A Hydra config group is just a function that mutates a draft."""
-    cfg.model.dim = 1024
+class Run(C.Config):
+    seed: int
+    optimizer: Optimizer = Optimizer()
+    model: Model = Model()
 ```
 
-`C.Config` is a pydantic `BaseModel` with `extra="forbid"`, `frozen=True` (finals are
-immutable and hashable), `strict=True`, `use_attribute_docstrings=True`, and
-`validate_default=True`.
-nshconfig also re-exports the useful Pydantic v2 authoring surface (`C.Field`,
-`C.field_validator`, `C.model_validator`, `C.TypeAdapter`, constraints, URL types, etc.) so
-ordinary config modules can usually import only `nshconfig as C`.
+`Field(default_factory=Norm.config_draft)` defers the child until `Model` has an
+active validation context. The normal `Optimizer()` and `Model()` finals are
+templates when their parent becomes a draft.
 
-To set project-wide defaults before defining or importing config classes, call:
+## Compose a draft
 
 ```python
-import nshconfig as C
+work = Run.config_draft()
+work.seed = 7
+work.optimizer.learning_rate = 1e-4
+work.model.dim = 1024
 
-C.set_model_config_defaults(arbitrary_types_allowed=True)
+assert C.is_draft(work)
+assert C.is_draft(work.model)
 ```
 
-## Compose, finalize, run
+Draft assignment does not validate. Required Config fields lazily create child
+drafts. Reading another missing required field raises `C.UnsetError`.
+
+## Finalize once
 
 ```python
-import nshconfig as C
-from myproj.configs import TrainConfig, ModelConfig, large
+run = work.config_finalize()
 
-cfg = TrainConfig.config_draft()          # a REAL TrainConfig instance, mutable, unvalidated
-large(cfg)                         # helpers mutate drafts
-cfg.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)  # this tree only
-cfg.model.decoder = ...            # nested configs auto-create on access; no ceremony
-
-final = cfg.config_finalize()            # resolve interpolation -> validate ONCE -> frozen
-final.model_dump_json(indent=2)    # the run record: concrete values only
+assert run.seed == 7
+assert run.model.dim == 1024
+assert run.model.norm.dim == 1024
+assert not C.is_draft(run)
 ```
 
-Explicit always beats interpolation: provide a value (constructor, dict, or draft write) and
-the lambda never runs. `del cfg.model.encoder.ln.dim` re-arms whatever sits below (a class
-rule, a static default, or a required-missing error at finalize).
-
-## Sweeps
-
-`finalize` is non-destructive and idempotent; the draft stays live:
+Finalization recursively collects the declared Config graph, evaluates
+interpolation, and runs normal Pydantic validation. It is non-destructive:
 
 ```python
-for lr in (1e-4, 3e-4, 1e-3):
-    cfg.optim.lr = lr
-    submit(train, cfg.config_finalize())
+work.model.dim = 2048
+larger = work.config_finalize()
+
+assert run.model.norm.dim == 1024
+assert larger.model.norm.dim == 2048
 ```
 
-To tweak an existing final: `t = final.config_thaw()` gives a fresh draft seeded only from
-explicitly-set values, so interpolated values re-derive after your tweak.
+## Use ordinary Pydantic construction
 
-## Why did this run use that value?
+Users who do not need draft composition can construct the same schema normally:
 
 ```python
-with C.source("sweep:lr"):
-    cfg.optim.lr = 1e-4
+direct = Run(
+    seed=7,
+    optimizer=Optimizer(learning_rate=1e-4),
+    model=Model(dim=1024),
+)
 
-print(cfg.config_finalize().config_explain("optim.lr"))
-# optim.lr = 0.0001
-#   set to 0.0001 at sweep.py:12 in <module>  [sweep:lr]   | cfg.optim.lr = 1e-4
-#   set to 0.0003 at configs/base.py:7 in base_config      | cfg.optim.lr = 3e-4
-#   class default: 0.001 (OptimConfig)
+assert direct == run
 ```
 
-See the [provenance guide](guides/provenance.md).
+Pydantic owns aliases, validators, serialization, and JSON Schema:
+
+```python
+payload = run.model_dump()
+schema = Run.model_json_schema()
+checked = Run.model_validate(payload)
+```
+
+Draft serialization is rejected, including through `TypeAdapter` and nested
+Pydantic serializers.
+
+## Build project presets
+
+Reusable presets and root experiment files are both ordinary mutators:
+
+```python
+def large_model(cfg: Model, *, dim: int = 2048) -> Model:
+    cfg.dim = dim
+    return cfg
+
+
+def __config__(cfg: Run) -> Run:
+    large_model(cfg.model)
+    cfg.seed = 11
+    return cfg
+```
+
+See [project composition](guides/project-layout.md) for the endorsed directory
+layout and application-side identity check.

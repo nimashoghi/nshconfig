@@ -1,93 +1,164 @@
 # nshconfig
 
-Typed, provenance-aware configuration for ML runs, powered by [Pydantic](https://github.com/pydantic/pydantic).
+Typed, Python-first configuration for ML runs, built on
+[Pydantic](https://docs.pydantic.dev/).
 
-**[Documentation](https://nima.sh/nshconfig/)**
+`nshconfig` adds two ideas to ordinary Pydantic models:
 
-One verb family and one value:
+- explicit mutable drafts for assembling incomplete configuration;
+- declaration-ordered Python interpolation over canonical validated values.
 
-- `Cls.config_draft()` gives a mutable draft: plain Python assignment, nested configs auto-create,
-  validation deferred.
-- `C.interp(lambda c: ...)` is a **value** that resolves against the config tree at validation.
-  It is legal anywhere a value sits: assigned on a draft, inside a `model_validate` dict, or as
-  a class default. This is Hydra-style interpolation, in Python, mostly type-checked.
-- `draft.config_finalize()` resolves interpolation, validates once, and returns a frozen, hashable,
-  fully-concrete config.
+There is no YAML language, registry, loader, code generator, provenance layer, or
+Pydantic re-export layer.
 
-Plus provenance: `final.config_explain("optim.lr")` answers *"why did this run use that value?"* down
-to file, line, function, source text, and the interpolation's "because" chain.
+**[Documentation](https://nima.sh/nshconfig/)** | **[Semantic design](https://github.com/nimashoghi/nshconfig/blob/main/DESIGN.md)**
 
 ## Install
 
 ```bash
-pip install nshconfig            # pydantic>=2.13, Python>=3.10
-pip install nshconfig[treescope] # optional rich notebook rendering
+pip install --pre nshconfig
+pip install --pre 'nshconfig[treescope]'   # rich notebook rendering
+pip install --pre 'nshconfig[transport]'   # trusted cloudpickle transport
 ```
 
-## Quickstart
+`nshconfig` supports Python 3.10 through 3.14 and Pydantic 2.13 through the
+latest Pydantic 2.x release.
+
+## Two construction modes
+
+Calling a config class has ordinary Pydantic meaning and returns a validated,
+field-frozen final:
 
 ```python
 import nshconfig as C
 
-class LNConfig(C.Config):
-    dim: int = 32                  # plain default; leaf classes need no interpolation
-    eps: float = 1e-5
 
-class EncoderConfig(C.Config):
-    ln: LNConfig
+class Child(C.Config):
+    x: int = 1
+    y: int = 2
 
-class HeadConfig(C.Config):
-    # class-level interpolation: a value sitting in the default slot
-    dim: int = C.interp(lambda c: c.nearest(ModelConfig).dim)
 
-class ModelConfig(C.Config):
-    dim: int = 768
-    encoder: EncoderConfig
-    head: HeadConfig
+class Parent(C.Config):
+    child: Child = Child()
 
-class TrainConfig(C.Config):
-    batch: int = 8
-    model: ModelConfig
 
-# compose in a notebook; helpers are plain functions (your "config groups")
-def large(cfg: TrainConfig) -> None:
-    cfg.model.dim = 1024
-
-cfg = TrainConfig.config_draft()
-large(cfg)
-# instance-level interpolation: wire THIS tree only, at composition time
-cfg.model.encoder.ln.dim = C.interp(lambda c: c.nearest(ModelConfig).dim)
-
-final = cfg.config_finalize()            # the one validation boundary
-assert final.model.encoder.ln.dim == 1024   # followed the knob
-assert final.model.head.dim == 1024         # class-default rule, same machinery
-final.model_dump_json()                     # concrete values only: the run record
-
-# why did this run use that value?
-print(final.config_explain("model.head.dim"))
-# model.head.dim = 1024
-#   interpolated to 1024 by <lambda> @ configs.py:11 (class default)
-#       because model.dim = 1024
-#   class-default rule: interp(<<lambda> @ configs.py:11>)   (active)
+final = Parent(child=Child(x=10, y=20))
+assert not C.is_draft(final)
 ```
 
-Explicit always beats interpolation (presence in the input slot beats the default slot; last
-write wins; `del` re-arms). Nothing pending can reach a final, a dump, an f-string, or an `if`
-without a loud error naming the dotted path and the source line. Drafts cloudpickle to clusters
-mid-composition and finalize on the far side, provenance included.
+Composition uses an explicit draft and one validation boundary:
 
-## The Ctx API (what the lambda sees)
+```python
+work = Parent.config_draft()
+assert C.is_draft(work.child)
 
-| Accessor | Hydra equivalent | Sees |
-|---|---|---|
-| `c.self()` / `c.self(Cls)` | same level | own fields, earlier markers already resolved |
-| `c.parent()` / `c.parent(Cls)` | `${..x}` | one level up, resolved |
-| `c.parent(n)` / `c.parent(n, Cls)` | `${...x}` | exactly `n` ancestor hops up |
-| `c.root()` / `c.root(Cls)` | `${a.b}` | the validation root, incl. sibling subtrees |
-| `c.nearest(Cls)` | (none: better) | nearest enclosing `Cls`; survives restructuring |
+work.child.x = 10
+final = work.config_finalize()
 
-Passing a class gives typed field access and a runtime assertion. Omitting the class keeps the
-selector dynamic and performs no type assertion.
+assert final == Parent(child=Child(x=10, y=2))
+assert C.is_draft(work)  # finalization is non-destructive
+```
+
+A normally constructed `Config` default is a template. When its parent becomes a
+draft, default-origin children become fresh drafts recursively through annotated
+lists, tuples, mappings, unions, and TypedDict values. An explicitly assigned
+final remains a final.
+
+Required fields with one concrete `Config` annotation lazily create child drafts.
+Reading another unset required field raises `UnsetError`. Draft writes are not
+validated until `config_finalize()`.
+
+## Interpolation
+
+`interp()` derives one complete field value. Pydantic field declaration order is
+dependency order:
+
+```python
+from pydantic import Field
+
+
+class Norm(C.Config):
+    dim: int = C.interp(lambda context: context.parent(Model).dim)
+
+
+class Model(C.Config):
+    dim: int = 768
+    norm: Norm = Field(default_factory=Norm.config_draft)
+
+
+assert Model().norm.dim == 768
+```
+
+The callable may use `context.current()`, `parent()`, `root()`, or
+`nearest(ConfigType)`. It sees only earlier fields whose complete Pydantic field
+validation has finished. The interpolation result then runs through the target
+field's normal validation pipeline.
+
+Use `Field(default_factory=Child.config_draft)` when a default child needs its
+parent's interpolation context. A direct `Child()` default must be valid on its
+own when the parent class body executes.
+
+## Project composition convention
+
+Keep reusable config builders under `src/project/configs/` as ordinary in-place
+mutators:
+
+```python
+def resnet50(cfg: ModelConfig, *, d_model: int = 256) -> ModelConfig:
+    cfg.d_model = d_model
+    return cfg
+```
+
+Root files under `configs/` use the same contract:
+
+```python
+def __config__(cfg: TrainConfig) -> TrainConfig:
+    resnet50(cfg.model)
+    cfg.seed = 7
+    return cfg
+```
+
+The application owns loading. It creates the expected root draft, calls
+`__config__`, verifies that the returned object is the identical draft, and calls
+`config_finalize()` exactly once. `nshconfig` intentionally provides no loader or
+registry.
+
+## Pydantic behavior
+
+Pydantic owns fields, aliases, validators, constraints, serialization, JSON
+Schema, and normal constructors. Import those APIs directly from `pydantic`.
+
+The base config is strict, forbids extras, validates defaults, revalidates model
+instances, and is shallowly field-frozen. A project base class may change policy
+such as strictness, but not lifecycle settings.
+
+Model validators retain native Pydantic semantics. Model-after hooks may mutate
+or replace values, which can make an interpolated relationship stale. Likewise,
+`final.model_copy(update=...)` does not validate its updates. To validate the
+current concrete contents of a final, use:
+
+```python
+checked = type(final).model_validate(final)
+```
+
+Drafts cannot be copied or serialized through Pydantic or JSON. Trusted pickle
+transport is the explicit exception described below. Finals use value equality
+and the same field-value hashing rule as frozen Pydantic models: they are hashable
+exactly when all field values are hashable. Freezing is shallow, so lists,
+dictionaries, sets, and arbitrary objects retain ordinary Python mutability.
+
+The public package API is `Config`, `Context`, `interp`, `is_draft`, `DraftError`,
+and `UnsetError`, plus `__version__`.
+
+## Trusted executable transport
+
+Cloudpickle can transport notebook-local classes, drafts, and interpolation
+callables between compatible trusted environments. Pickle data can execute code;
+never load it from an untrusted source. A final contains concrete values and cannot
+recreate the original draft recipe.
+
+See the [semantic design](https://github.com/nimashoghi/nshconfig/blob/main/DESIGN.md)
+for the complete lifecycle and validation contract.
 
 ## License
 

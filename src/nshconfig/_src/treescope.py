@@ -21,32 +21,62 @@ def render_config(
 ) -> "rendering_parts.Rendering":
     from treescope import rendering_parts
 
-    from .config import Config, is_draft
+    from .config import Config
+    from .state import draft_state, is_draft
 
     draft = is_draft(obj)
     d = object.__getattribute__(obj, "__dict__")
+    pending = draft_state(obj).pending if draft else {}
     children = []
     items: list[tuple[str, Any, bool]] = []  # (name, value-or-label, dimmed)
     for name, f in type(obj).__pydantic_fields__.items():
+        if name in pending:
+            marker = pending[name]
+            origin = (
+                "instance" if name in obj.__pydantic_fields_set__ else "class default"
+            )
+            items.append(
+                (name, rendering_parts.text(f"[pending: {origin} {marker!r}]"), False)
+            )
+            continue
         if name in d:
             v = d[name]
             if isinstance(v, Interp):
-                items.append((name, rendering_parts.text(f"[pending: instance {v!r}]"), False))
-            else:
-                dimmed = (
-                    name not in obj.__pydantic_fields_set__
-                    if draft
-                    else (not f.is_required() and not isinstance(f.default, Interp) and v == f.default)
+                items.append(
+                    (name, rendering_parts.text(f"[pending: instance {v!r}]"), False)
                 )
+            else:
+                if draft:
+                    dimmed = name not in obj.__pydantic_fields_set__
+                elif f.is_required() or isinstance(f.default, Interp):
+                    dimmed = False
+                else:
+                    try:
+                        equal = v == f.default
+                        dimmed = equal if isinstance(equal, bool) else bool(equal)
+                    except Exception:
+                        dimmed = False
                 items.append((name, v, dimmed))
         else:
             dflt = f.default
             ann = f.annotation
             if isinstance(dflt, Interp):
-                items.append((name, rendering_parts.text(f"[pending: class default {dflt!r}]"), True))
+                items.append(
+                    (
+                        name,
+                        rendering_parts.text(f"[pending: class default {dflt!r}]"),
+                        True,
+                    )
+                )
             elif f.is_required():
                 if isinstance(ann, type) and issubclass(ann, Config):
-                    items.append((name, rendering_parts.text(f"<untouched {ann.__name__}>"), True))
+                    items.append(
+                        (
+                            name,
+                            rendering_parts.text(f"<untouched {ann.__name__}>"),
+                            True,
+                        )
+                    )
                 else:
                     items.append((name, rendering_parts.text("[UNSET]"), False))
 

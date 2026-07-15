@@ -1,346 +1,549 @@
-"""The Config base: frozen finals, live drafts, one validation boundary.
+"""The Config base class: ordinary validated finals plus explicit mutable drafts."""
 
-Drafts are REAL pydantic instances made by ``model_construct`` plus three attribute
-dunders. Draft writes go straight to ``__dict__`` (never through
-``BaseModel.__setattr__``'s handler-memoization path, which is what made the v1
-draft mechanism unsound), with ``__pydantic_fields_set__`` as native provenance.
-The dunders are hidden from the type checker so basedpyright keeps pydantic's
-declared attribute semantics on drafts: typo'd draft writes are STATIC errors.
-"""
-
-from collections.abc import Mapping
-import difflib
-from types import MethodType
-from typing import TYPE_CHECKING, Any, Callable, cast
-
-from pydantic import BaseModel, ConfigDict, model_validator
-from typing_extensions import Self, Unpack, override
-
-from . import transport as transport  # registers the pickle shim on import
-from .errors import DraftError, UnsetError
-from .interp import Interp
-from .provenance import record_del, record_seeds, record_write
-from .scope import interpolation_scope
-
-if TYPE_CHECKING:
-    from .provenance import Event, Explanation
-
-__all__ = ["Config", "is_draft", "set_model_config_defaults"]
-
-DRAFT_KEY = "__nshconfig_draft__"
-_UNSET = object()
-_CONFIG_DICT_KEYS = frozenset(ConfigDict.__annotations__)
-_BUILTIN_MODEL_CONFIG = ConfigDict(
-    extra="forbid",
-    frozen=True,
-    strict=True,
-    use_attribute_docstrings=True,
-    validate_default=True,
+import operator
+from collections.abc import Generator, Mapping
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Generic,
+    cast,
+    get_args,
+    get_origin,
 )
-_MODEL_CONFIG_DEFAULTS = _BUILTIN_MODEL_CONFIG
 
+from pydantic import BaseModel, ConfigDict, GetCoreSchemaHandler, GetJsonSchemaHandler
+from pydantic_core import CoreSchema, PydanticUndefined, ValidationError
+from typing_extensions import Self, override
 
-def _builtin_model_config_with(overrides: ConfigDict) -> ConfigDict:
-    return cast("ConfigDict", {**_BUILTIN_MODEL_CONFIG, **overrides})
+from .annotations import (
+    unsupported_container_annotation,
+    unwrap_annotation,
+    unwrap_type_alias,
+)
+from .draft import delete_field, draft_repr, ensure_final, read_field, set_field
+from .errors import DraftError
+from .scope import build_config_json_schema, build_config_schema
+from .state import (
+    FinalState,
+    Recipe,
+    RESERVED_PRIVATE_KEYS,
+    STATE_KEY,
+    is_draft,
+    make_recipe,
+    set_final_state,
+    state_of,
+    valid_recipe,
+    value_token,
+)
 
+__all__ = ["Config"]
 
-def _active_model_config_with(overrides: ConfigDict) -> ConfigDict:
-    return cast("ConfigDict", {**_MODEL_CONFIG_DEFAULTS, **overrides})
-
-
-def set_model_config_defaults(**overrides: Unpack[ConfigDict]) -> None:
-    """Set default pydantic config for future ``Config`` subclasses.
-
-    Call this before defining or importing project config classes. Existing
-    classes keep the pydantic validators they were built with.
-    """
-    global _MODEL_CONFIG_DEFAULTS
-    _MODEL_CONFIG_DEFAULTS = _builtin_model_config_with(overrides)
-    Config.model_config = _MODEL_CONFIG_DEFAULTS
-
-
-def _explicit_config_from(value: object) -> ConfigDict:
-    if not isinstance(value, Mapping):
-        raise TypeError("model_config must be a mapping")
-    return cast("ConfigDict", dict(value))
-
-
-# Pydantic compiles validators during class creation. Injecting the active
-# defaults here makes global changes apply to future direct and indirect
-# subclasses while preserving explicit class-level overrides.
-class _ConfigMeta(type(BaseModel)):
-    def __new__(
-        mcls,
-        name: str,
-        bases: tuple[type, ...],
-        namespace: dict[str, Any],
-        **kwargs: Any,
-    ) -> type:
-        config_cls = globals().get("Config")
-        if isinstance(config_cls, type) and any(issubclass(base, config_cls) for base in bases):
-            inherited_explicit = ConfigDict()
-            for base in bases:
-                inherited_explicit.update(
-                    getattr(base, "__nshconfig_explicit_model_config__", {})
-                )
-
-            raw_class_config = namespace.get("model_config", _UNSET)
-            class_config = (
-                ConfigDict()
-                if raw_class_config is _UNSET
-                else _explicit_config_from(raw_class_config)
-            )
-            class_kwargs = cast(
-                "ConfigDict", {k: v for k, v in kwargs.items() if k in _CONFIG_DICT_KEYS}
-            )
-
-            namespace = dict(namespace)
-            namespace["model_config"] = _active_model_config_with(
-                cast("ConfigDict", {**inherited_explicit, **class_config})
-            )
-            cls = super().__new__(mcls, name, bases, namespace, **kwargs)
-            cls.__nshconfig_explicit_model_config__ = cast(
-                "ConfigDict", {**inherited_explicit, **class_config, **class_kwargs}
-            )
-            return cls
-
-        return super().__new__(mcls, name, bases, namespace, **kwargs)
-
-
-def is_draft(obj: Any) -> bool:
-    """True if ``obj`` is a config draft (mutable, not yet validated)."""
-    return isinstance(obj, BaseModel) and object.__getattribute__(obj, "__dict__").get(
-        DRAFT_KEY, False
-    )
-
-
-def _verb_config_finalize(self: "Config") -> "Config":
-    from .finalize import finalize
-
-    return finalize(self)
-
-
-def _verb_config_thaw(self: "Config") -> "Config":
-    from .finalize import thaw
-
-    return thaw(self)
-
-
-def _verb_config_explain(self: "Config", path: str) -> "Explanation":
-    from .provenance import explain
-
-    return explain(self, path)
-
-
-def _verb_config_provenance(self: "Config") -> "dict[str, list[Event]]":
-    from .provenance import provenance
-
-    return provenance(self)
-
-
-# The config_* verb family, dispatched from Config.__getattr__ rather than living as
-# class attributes. This is what makes the collision story exact: a user field named
-# config_finalize leaves NO parent attribute to shadow, so it gets true field
-# semantics (required stays required, no pydantic shadow warning), and the verb
-# simply does not exist on that class. The module-level verbs (C.finalize etc.)
-# remain the universal fallback. Deliberately NOT policed via protected_namespaces:
-# fields like config_name / config_path stay warning-free.
-_VERBS: dict[str, tuple[Callable[..., Any], bool]] = {  # name -> (impl, is_property)
-    "config_finalize": (_verb_config_finalize, False),
-    "config_thaw": (_verb_config_thaw, False),
-    "config_explain": (_verb_config_explain, False),
-    "config_provenance": (_verb_config_provenance, False),
-    "config_is_draft": (is_draft, True),
+_LIFECYCLE_CONFIG: dict[str, Any] = {
+    "extra": "forbid",
+    "frozen": True,
+    "validate_default": True,
+    "revalidate_instances": "always",
+    "validate_by_alias": True,
+    "validate_by_name": True,
+    "from_attributes": False,
 }
+_MISSING_HASH_VALUE = object()
+_RESERVED_METHODS = frozenset(
+    {
+        "__copy__",
+        "__deepcopy__",
+        "__delattr__",
+        "__eq__",
+        "__get_pydantic_core_schema__",
+        "__get_pydantic_json_schema__",
+        "__getattr__",
+        "__getattribute__",
+        "__hash__",
+        "__fields_set__",
+        "__init__",
+        "__init_subclass__",
+        "__iter__",
+        "__ne__",
+        "__new__",
+        "__pydantic_init_subclass__",
+        "__setattr__",
+        "copy",
+        "config_draft",
+        "config_finalize",
+        "model_construct",
+        "model_copy",
+        "model_dump",
+        "model_dump_json",
+        "model_fields_set",
+        "model_validate",
+        "model_validate_json",
+        "model_validate_strings",
+    }
+)
 
 
-class Config(BaseModel, metaclass=_ConfigMeta):
-    model_config = _MODEL_CONFIG_DEFAULTS
+def _unsafe_validation_metadata(
+    annotation: Any,
+    metadata: tuple[Any, ...] = (),
+    active: set[int] | None = None,
+) -> str | None:
+    if active is None:
+        active = set()
+    identity = id(annotation)
+    if identity in active:
+        return None
+    active.add(identity)
+    annotation = unwrap_type_alias(annotation)
+    for item in metadata:
+        item_type = item if isinstance(item, type) else type(item)
+        qualified = f"{item_type.__module__}.{item_type.__qualname__}"
+        if qualified in {
+            "pydantic.functional_validators.SkipValidation",
+            "pydantic.functional_validators.InstanceOf",
+            "pydantic.types._OnErrorOmit",
+        }:
+            return item_type.__qualname__.lstrip("_")
 
-    # The one resolution site. Module-level function (see scope.py) attached here so
-    # cloudpickle of notebook-defined subclasses serializes it by reference.
-    nshconfig_interpolation_scope = model_validator(mode="wrap")(
-        classmethod(interpolation_scope)  # pyright: ignore[reportArgumentType]
+    arguments = get_args(annotation)
+    if get_origin(annotation) is Annotated:
+        nested = _unsafe_validation_metadata(arguments[0], tuple(arguments[1:]), active)
+        if nested is not None:
+            return nested
+        return None
+    for argument in arguments:
+        nested = _unsafe_validation_metadata(argument, active=active)
+        if nested is not None:
+            return nested
+    return None
+
+
+def _uses_callable_discriminator(
+    annotation: Any,
+    metadata: tuple[Any, ...] = (),
+    active: set[int] | None = None,
+) -> bool:
+    if active is None:
+        active = set()
+    identity = id(annotation)
+    if identity in active:
+        return False
+    active.add(identity)
+    annotation = unwrap_type_alias(annotation)
+    if any(
+        (candidate := getattr(item, "discriminator", None)) is not None
+        and not isinstance(candidate, str)
+        and callable(candidate)
+        for item in metadata
+    ):
+        return True
+    arguments = get_args(annotation)
+    if get_origin(annotation) is Annotated:
+        return _uses_callable_discriminator(
+            arguments[0],
+            tuple(arguments[1:]),
+            active,
+        )
+    return any(
+        _uses_callable_discriminator(argument, active=active) for argument in arguments
     )
+
+
+def _raise_frozen(instance: BaseModel, name: str, value: Any) -> None:
+    raise ValidationError.from_exception_data(
+        type(instance).__name__,
+        [{"type": "frozen_instance", "loc": (name,), "input": value}],
+    )
+
+
+def _recipe_from_copy(obj: BaseModel, *, source_was_intact: bool) -> Recipe | None:
+    """Recover copied raw inputs and refresh identity-bearing integrity tokens."""
+
+    state = state_of(obj)
+    if not source_was_intact or not isinstance(state, FinalState):
+        return None
+    recipe = state.recipe
+    if recipe is None:
+        return None
+    return Recipe(inputs=recipe.inputs, input_token=value_token(recipe.inputs))
+
+
+def _validate_class_shape(cls: type[BaseModel]) -> None:
+    is_base = cls.__module__ == __name__ and cls.__name__ == "Config"
+    if cls.__pydantic_root_model__:
+        raise TypeError("Config does not support Pydantic RootModel subclasses")
+    reserved_private = RESERVED_PRIVATE_KEYS & cls.__private_attributes__.keys()
+    if reserved_private:
+        name = sorted(reserved_private)[0]
+        raise TypeError(
+            f"{cls.__name__} declares reserved private attribute {name!r}; "
+            "that name stores nshconfig lifecycle state"
+        )
+
+    if is_base:
+        return
+    config_base = globals()["Config"]
+    allowed_owners = set(config_base.__mro__)
+    overridden = []
+    for method in _RESERVED_METHODS:
+        owner = next((base for base in cls.__mro__ if method in base.__dict__), None)
+        generic_lifecycle = method == "__init_subclass__" and owner is Generic
+        if owner not in allowed_owners and not generic_lifecycle:
+            overridden.append(method)
+    if overridden:
+        name = min(overridden)
+        raise TypeError(
+            f"{cls.__name__} overrides reserved Config lifecycle method {name!r}"
+        )
+
+
+def _validate_lifecycle_settings(cls: type[BaseModel]) -> None:
+    broken = {
+        name: (cls.model_config.get(name), required)
+        for name, required in _LIFECYCLE_CONFIG.items()
+        if cls.model_config.get(name) != required
+    }
+    if broken:
+        details = ", ".join(
+            f"{name}={actual!r} (required {required!r})"
+            for name, (actual, required) in broken.items()
+        )
+        raise TypeError(
+            f"{cls.__name__} overrides nshconfig lifecycle settings: {details}"
+        )
+
+
+def _validate_config_field(cls: type[BaseModel], name: str, model_field: Any) -> None:
+    metadata = tuple(model_field.metadata)
+    unsafe = _unsafe_validation_metadata(model_field.annotation, metadata)
+    if unsafe is not None:
+        raise TypeError(
+            f"{cls.__name__}.{name} uses {unsafe}, which can bypass or omit "
+            "Config field validation"
+        )
+    if _uses_callable_discriminator(model_field.annotation, metadata):
+        raise TypeError(
+            f"{cls.__name__}.{name} uses a callable union discriminator; incomplete "
+            "Config drafts cannot execute an opaque branch-selection protocol. Use a "
+            "string discriminator or an ordinary union of concrete Config types"
+        )
+    if (
+        unsupported := unsupported_container_annotation(model_field.annotation)
+    ) is not None:
+        raise TypeError(
+            f"{cls.__name__}.{name} uses unsupported container annotation {unsupported}; "
+            "Config values use finite built-in dict, list, tuple, set, and frozenset "
+            "containers"
+        )
+    if model_field.validate_default is False:
+        raise TypeError(
+            f"{cls.__name__}.{name} disables default validation; every Config field "
+            "must publish one canonical value for declaration-ordered interpolation"
+        )
+
+    direct_annotation, _ = unwrap_annotation(model_field.annotation, None)
+    config_base = globals()["Config"]
+    direct_config = isinstance(direct_annotation, type) and issubclass(
+        direct_annotation, config_base
+    )
+    from .interp import Interp
+
+    if (
+        direct_config
+        and model_field.default is not PydanticUndefined
+        and not isinstance(model_field.default, Interp)
+        and (
+            not isinstance(model_field.default, config_base)
+            or valid_recipe(model_field.default) is None
+        )
+    ):
+        raise TypeError(
+            f"{cls.__name__}.{name} has a Config default without an intact "
+            "constructor recipe; use a normally constructed Config value or a "
+            "default factory returning a fresh draft"
+        )
+
+
+def _validate_config_class(cls: type[BaseModel]) -> None:
+    """Recheck class policy after creation and every forward-ref schema rebuild."""
+
+    _validate_class_shape(cls)
+    _validate_lifecycle_settings(cls)
+    for name, model_field in cls.__pydantic_fields__.items():
+        _validate_config_field(cls, name, model_field)
+
+
+class Config(BaseModel):
+    """Base class for field-frozen Pydantic configuration with explicit drafts."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        strict=True,
+        use_attribute_docstrings=True,
+        validate_default=True,
+        revalidate_instances="always",
+        validate_by_alias=True,
+        validate_by_name=True,
+        from_attributes=False,
+        serialize_by_alias=False,
+    )
+
+    def __init__(self, /, **data: Any) -> None:
+        try:
+            object.__getattribute__(self, "__pydantic_fields_set__")
+        except AttributeError:
+            pass
+        else:
+            raise TypeError(
+                "Config instances cannot be reinitialized; construct a new final or edit a draft"
+            )
+        recipe = make_recipe(data)
+        super().__init__(**data)
+        set_final_state(self, recipe)
+
+    # This guard is behaviorally equivalent to BaseModel.__init__ for fresh
+    # objects.  Tell Pydantic not to insert a second custom-init validation
+    # pass into the generated schema.
+    setattr(__init__, "__pydantic_base_init__", True)
 
     @classmethod
-    def config_draft(cls, **values: Any) -> Self:
-        """A mutable draft of this config: plain assignment, validation deferred.
+    @override
+    def __get_pydantic_core_schema__(
+        cls, source: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return build_config_schema(cls, source, handler)
 
-        Nested ``Config``-typed fields auto-vivify on access;
-        ``draft.config_finalize()`` is the one validation boundary. Seed values
-        count as explicit provenance.
-        """
-        m = cls.model_construct(**values)
-        # Strip marker DEFAULTS materialized by model_construct; keep user-passed
-        # markers (user-set provenance, exactly like any other value). pydantic
-        # stubs type __dict__ as a mapping proxy; at runtime it is a plain dict.
-        md = cast("dict[str, Any]", cast(object, m.__dict__))
-        for n, v in list(md.items()):
-            if isinstance(v, Interp) and n not in m.__pydantic_fields_set__:
-                del md[n]
-        object.__setattr__(m, DRAFT_KEY, True)
-        if values:
-            seeded = [n for n in m.__pydantic_fields_set__ if n in values]
-            if seeded:
-                record_seeds(m, seeded, values)
-        return m
+    @classmethod
+    @override
+    def __get_pydantic_json_schema__(
+        cls, schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> dict[str, Any]:
+        return build_config_json_schema(schema, handler)
 
-    # ---- equality and hashing over declared fields only ----
-    # Provenance chains and the draft flag ride instance __dict__ under dunder keys;
-    # pydantic's BaseModel.__eq__ (and its frozen __hash__) consume the whole
-    # __dict__, which would make two value-identical configs with different
-    # histories compare unequal. Field-based semantics restore the data-only view.
+    @classmethod
+    @override
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        super().__pydantic_init_subclass__(**kwargs)
+        _validate_config_class(cls)
+
+    @classmethod
+    def config_draft(cls) -> Self:
+        """Create an incomplete mutable draft without running Pydantic hooks."""
+
+        from .draft import create_draft
+
+        return create_draft(cls)
+
+    def config_finalize(self) -> Self:
+        """Validate this draft into a fresh final without consuming it."""
+
+        from .finalize import finalize
+
+        return finalize(self)
+
+    @classmethod
+    @override
+    def model_construct(
+        cls, _fields_set: set[str] | None = None, **values: Any
+    ) -> Self:
+        raise TypeError(
+            "Config.model_construct() is unsafe; use ConfigType.config_draft() or validation"
+        )
+
+    @override
+    def model_copy(
+        self, *, update: Mapping[str, Any] | None = None, deep: bool = False
+    ) -> Self:
+        if is_draft(self):
+            raise DraftError(
+                "drafts cannot be copied through model_copy(); keep the original draft"
+            )
+        copied = super().model_copy(update=update, deep=deep)
+        recipe = valid_recipe(copied) if not update else None
+        set_final_state(copied, recipe)
+        return copied
+
+    @override
+    def copy(self, *args: Any, **kwargs: Any) -> Self:
+        raise TypeError("Config.copy() is unsafe and unsupported; use model_copy()")
+
+    @override
+    def __copy__(self) -> Self:
+        if is_draft(self):
+            raise DraftError(
+                "drafts cannot be shallow-copied; keep the original draft recipe"
+            )
+        source_was_intact = valid_recipe(self) is not None
+        copied = cast(Self, BaseModel.__copy__(self))
+        set_final_state(
+            copied,
+            _recipe_from_copy(copied, source_was_intact=source_was_intact),
+        )
+        return copied
+
+    @override
+    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> Self:
+        if is_draft(self):
+            raise DraftError(
+                "drafts cannot be deep-copied; keep the original draft recipe"
+            )
+        source_was_intact = valid_recipe(self) is not None
+        if memo is None:
+            memo = {}
+        copied = cast(Self, BaseModel.__deepcopy__(self, memo))
+        set_final_state(
+            copied,
+            _recipe_from_copy(copied, source_was_intact=source_was_intact),
+        )
+        return copied
 
     @override
     def __eq__(self, other: object) -> bool:
         if self is other:
             return True
         if type(other) is not type(self):
-            return NotImplemented
-        sd = object.__getattribute__(self, "__dict__")
-        od = object.__getattribute__(other, "__dict__")
-        for n in type(self).__pydantic_fields__:
-            if sd.get(n, _UNSET) != od.get(n, _UNSET):
+            return False
+        assert isinstance(other, Config)
+        if is_draft(self) or is_draft(other):
+            return False
+        # Lifecycle metadata is not part of value equality. Delegate field
+        # semantics to Python while making equality total for hostile or
+        # array-like ``__eq__`` implementations.
+        left = object.__getattribute__(self, "__dict__")
+        right = object.__getattribute__(other, "__dict__")
+        missing = object()
+        for name in type(self).__pydantic_fields__:
+            left_value = left.get(name, missing)
+            right_value = right.get(name, missing)
+            if left_value is missing or right_value is missing:
+                if left_value is not right_value:
+                    return False
+                continue
+            if left_value is right_value:
+                continue
+            try:
+                equal = left_value == right_value
+                if not (equal if isinstance(equal, bool) else bool(equal)):
+                    return False
+            except Exception:
                 return False
         return True
 
     @override
     def __hash__(self) -> int:
-        d = object.__getattribute__(self, "__dict__")
-        return hash(
-            (type(self), tuple(id(_UNSET) if (v := d.get(n, _UNSET)) is _UNSET else v for n in type(self).__pydantic_fields__))
-        )
+        if is_draft(self):
+            raise TypeError(f"unhashable type: '{type(self).__name__}' draft")
+        fields = tuple(type(self).__pydantic_fields__)
+        if not fields:
+            return hash(0)
+        getter = operator.itemgetter(*fields)
+        data = object.__getattribute__(self, "__dict__")
+        try:
+            values = getter(data)
+        except KeyError:
+            values = tuple(data.get(name, _MISSING_HASH_VALUE) for name in fields)
+            if len(fields) == 1:
+                values = values[0]
+        return hash(values)
+
+    @property
+    @override
+    def model_fields_set(self) -> set[str]:
+        """Return a detached view so callers cannot mutate lifecycle bookkeeping."""
+        return set(self.__pydantic_fields_set__)
+
+    @property
+    @override
+    def __fields_set__(self) -> set[str]:
+        """Detached compatibility view for Pydantic's deprecated public alias."""
+
+        return set(self.__pydantic_fields_set__)
 
     @override
     def __repr__(self) -> str:
-        if not is_draft(self):
-            return BaseModel.__repr__(self)
-        bits: list[str] = []
-        d = object.__getattribute__(self, "__dict__")
-        for name, f in type(self).__pydantic_fields__.items():
-            if name in d:
-                v = d[name]
-                if isinstance(v, Interp):
-                    bits.append(f"{name}=[pending: instance {v!r}]")
-                elif is_draft(v):
-                    bits.append(f"{name}={v!r}")
-                elif name in self.__pydantic_fields_set__:
-                    bits.append(f"{name}={v!r}")
-                # materialized-but-untouched static defaults: omitted as noise
-            else:
-                dflt = f.default
-                ann = f.annotation
-                if isinstance(dflt, Interp):
-                    bits.append(f"{name}=[pending: class default {dflt!r}]")
-                elif f.is_required():
-                    if isinstance(ann, type) and issubclass(ann, Config):
-                        bits.append(f"{name}=<untouched {ann.__name__}>")
-                    else:
-                        bits.append(f"{name}=[UNSET]")
-        return f"<draft {type(self).__name__}({', '.join(bits)})>"
+        return draft_repr(self) if is_draft(self) else BaseModel.__repr__(self)
+
+    @override
+    def __str__(self) -> str:
+        return draft_repr(self) if is_draft(self) else BaseModel.__str__(self)
 
     def __treescope_repr__(self, path: str | None, subtree_renderer: Any) -> Any:
-        # Optional rich notebook rendering; only invoked by treescope itself.
         from .treescope import render_config
 
         return render_config(self, path, subtree_renderer)
 
-    # ---- the config_* verb family ----
-    # Dispatched from __getattr__ at runtime (a declared field by the same name wins,
-    # exactly, because the verb then never exists on that class); plain methods to the
-    # type checker so calls and return types are fully checked. The module-level verbs
-    # (C.finalize, C.thaw, C.explain, ...) remain the canonical functional layer
-    # underneath; these are pure DX sugar over them.
-    if TYPE_CHECKING:
+    @override
+    def __iter__(self) -> Generator[tuple[str, Any], None, None]:
+        ensure_final(self)
+        yield from BaseModel.__iter__(self)
 
-        def config_finalize(self) -> Self:
-            """Resolve interpolation, validate once, return the frozen final."""
-            ...
-
-        def config_thaw(self) -> Self:
-            """A fresh draft seeded only from explicitly-set values."""
-            ...
-
-        def config_explain(self, path: str) -> Explanation:
-            """Why does ``path`` have its value? Sites, chains, and because-lines."""
-            ...
-
-        def config_provenance(self) -> dict[str, list[Event]]:
-            """The full provenance table: dotted path -> event chain."""
-            ...
-
-        @property
-        def config_is_draft(self) -> bool:
-            """True while this config is a mutable, unvalidated draft."""
-            ...
-
-    # The draft dunders are hidden from the type checker so basedpyright keeps
-    # pydantic's declared attribute semantics (an ungated __getattr__ would turn
-    # every unknown attribute into Any and silently disable checking on drafts).
     if not TYPE_CHECKING:
 
-        def __setattr__(self, name, value):
-            if is_draft(self):
-                if name in type(self).__pydantic_fields__:
-                    self.__dict__[name] = value
-                    self.__pydantic_fields_set__.add(name)
-                    record_write(self, name, value)
-                    return
-                if not name.startswith("_"):
-                    hint = difflib.get_close_matches(
-                        name, type(self).__pydantic_fields__, n=1
-                    )
+        def __getattribute__(self, name: str) -> Any:
+            declared_field = (
+                not name.startswith("_") and name in type(self).__pydantic_fields__
+            )
+            if declared_field:
+                try:
+                    draft_instance = is_draft(self)
+                except AttributeError:
+                    draft_instance = False
+                if draft_instance:
+                    data = object.__getattribute__(self, "__dict__")
+                    if name in data:
+                        from .interp import Interp
+
+                        if isinstance(data[name], Interp):
+                            return read_field(self, name)
+            value = BaseModel.__getattribute__(self, name)
+            if declared_field:
+                from .interp import record_model_field_read
+
+                value = record_model_field_read(self, name, value)
+            return value
+
+        def __setattr__(self, name: str, value: Any) -> None:
+            if name.startswith("_"):
+                if name == STATE_KEY or is_draft(self):
                     raise AttributeError(
-                        f"{type(self).__name__} has no field {name!r}"
-                        + (f"; did you mean {hint[0]!r}?" if hint else "")
+                        f"{type(self).__name__} private or undeclared attribute {name!r} "
+                        "cannot be assigned on composition state"
                     )
+                BaseModel.__setattr__(self, name, value)
+                return
+            if is_draft(self) and not name.startswith("_"):
+                set_field(self, name, value)
+                return
+            if name in type(self).__pydantic_fields__:
+                _raise_frozen(self, name, value)
             BaseModel.__setattr__(self, name, value)
 
-        def __getattr__(self, name):
-            # Field semantics FIRST: pydantic's __getattr__ can return raw class
-            # attributes (e.g. a _ConfigVerb shadowed by a declared field), so an
-            # unset declared field on a draft must be handled before delegating.
-            fields = type(self).__pydantic_fields__
-            if is_draft(self) and name in fields:
-                f = fields[name]
-                if isinstance(f.default, Interp):
-                    # BEFORE auto-vivification, so an interpolated config-typed
-                    # field cannot silently shadow its marker.
-                    raise UnsetError(
-                        f"{type(self).__name__}.{name} is interpolated "
-                        f"({f.default!r}); read it after finalize(), or "
-                        "assign a value first"
-                    )
-                ann = f.annotation
-                if isinstance(ann, type) and issubclass(ann, Config):
-                    child = ann.config_draft()
-                    self.__dict__[name] = child  # present, but NOT user-set
-                    return child
-                raise UnsetError(
-                    f"{type(self).__name__}.{name} is not set on this draft"
-                )
-            if name in _VERBS:
-                impl, prop = _VERBS[name]
-                return impl(self) if prop else MethodType(impl, self)
+        def __getattr__(self, name: str) -> Any:
+            if is_draft(self) and name in type(self).__pydantic_fields__:
+                return read_field(self, name)
             return BaseModel.__getattr__(self, name)
 
-        def __delattr__(self, name):
-            if is_draft(self) and name in type(self).__pydantic_fields__:
-                had = name in self.__dict__ or name in self.__pydantic_fields_set__
-                self.__dict__.pop(name, None)
-                self.__pydantic_fields_set__.discard(name)
-                if had:
-                    record_del(self, name)
+        def __delattr__(self, name: str) -> None:
+            if name.startswith("_"):
+                if name == STATE_KEY or is_draft(self):
+                    raise AttributeError(
+                        f"{type(self).__name__} private or undeclared attribute {name!r} "
+                        "cannot be deleted from composition state"
+                    )
+                BaseModel.__delattr__(self, name)
                 return
+            if is_draft(self) and delete_field(self, name):
+                return
+            if name in type(self).__pydantic_fields__:
+                data = object.__getattribute__(self, "__dict__")
+                _raise_frozen(self, name, data.get(name, PydanticUndefined))
             BaseModel.__delattr__(self, name)
 
-        def model_dump(self, *a, **kw):
-            if is_draft(self):
-                raise DraftError("drafts are not serializable; finalize() first")
-            return BaseModel.model_dump(self, *a, **kw)
+        def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            ensure_final(self)
+            return BaseModel.model_dump(self, *args, **kwargs)
 
-        def model_dump_json(self, *a, **kw):
-            if is_draft(self):
-                raise DraftError("drafts are not serializable; finalize() first")
-            return BaseModel.model_dump_json(self, *a, **kw)
+        def model_dump_json(self, *args: Any, **kwargs: Any) -> str:
+            ensure_final(self)
+            return BaseModel.model_dump_json(self, *args, **kwargs)

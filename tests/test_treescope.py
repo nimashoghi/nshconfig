@@ -6,6 +6,9 @@ import nshconfig as C
 from tests.scenario import TrainConfig
 
 treescope = pytest.importorskip("treescope")
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:The chararray class is deprecated.*:DeprecationWarning"
+)
 
 
 def test_draft_renders_pending_labels():
@@ -19,8 +22,21 @@ def test_draft_renders_pending_labels():
     assert "<untouched EncoderConfig>" in text
 
 
+def test_draft_renders_explicit_interpolation_from_pending_state():
+    class Values(C.Config):
+        source: int = 2
+        copied: int = 0
+
+    cfg = Values.config_draft()
+    cfg.copied = C.interp(lambda context: context.current().source)
+
+    text = treescope.render_to_text(cfg)
+    assert "copied=" in text
+    assert "pending: instance interp(" in text
+
+
 def test_final_renders_with_concrete_values():
-    final = C.finalize(TrainConfig.config_draft())
+    final = TrainConfig.config_draft().config_finalize()
     text = treescope.render_to_text(final)
     assert "pending" not in text
     assert "768" in text
