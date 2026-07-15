@@ -51,9 +51,7 @@ def test_builtin_policy_uses_attribute_docstrings_as_descriptions() -> None:
     description = "Number of examples processed in one optimization step."
     assert _DocumentedConfig.model_fields["batch_size"].description == description
     assert (
-        _DocumentedConfig.model_json_schema()["properties"]["batch_size"][
-            "description"
-        ]
+        _DocumentedConfig.model_json_schema()["properties"]["batch_size"]["description"]
         == description
     )
 
