@@ -35,12 +35,16 @@ class Leaf(C.Config):
 `nearest(Model)` return the requested static type. Selector reachability and field
 declaration order remain runtime properties.
 
-## Eager annotations
+## Annotation evaluation
 
-Do not use `from __future__ import annotations` in Config modules. Quote only a
-forward reference whose name is genuinely defined later. Eager annotations are
-required for reliable Pydantic schema transport of notebook-defined classes across
-Python 3.10 through 3.14.
+Normal eager annotations, explicit quoted forward references, and
+`from __future__ import annotations` are all supported across Python 3.10 through
+3.14. The optional trusted cloudpickle transport also supports these forms for
+notebook-local Config classes.
+
+Name resolution otherwise follows Pydantic. If an annotation refers to a name
+that is still unavailable when the class is created, define the name and call
+`ConfigType.model_rebuild()` using the same rules as an ordinary Pydantic model.
 
 Names used only inside an interpolation lambda are resolved when the callable
 runs, so a later class may be referenced without turning the field annotation into

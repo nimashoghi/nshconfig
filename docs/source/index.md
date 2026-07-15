@@ -1,8 +1,9 @@
 # nshconfig
 
 `nshconfig` is a small lifecycle layer over Pydantic for typed, Python-first ML
-configuration. Pydantic defines and validates the schema. `nshconfig` adds
-explicit mutable drafts and declaration-ordered Python interpolation.
+configuration. Pydantic defines and validates the schema, and nshconfig
+re-exports its authoring API for a single import. `nshconfig` adds explicit
+mutable drafts and declaration-ordered Python interpolation.
 
 ```python
 import nshconfig as C

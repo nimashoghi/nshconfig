@@ -1074,6 +1074,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+all = [
+    { name = "cloudpickle" },
+    { name = "treescope" },
+]
 transport = [
     { name = "cloudpickle" },
 ]
@@ -1102,12 +1106,14 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cloudpickle", marker = "extra == 'all'", specifier = ">=3.1.2" },
     { name = "cloudpickle", marker = "extra == 'transport'", specifier = ">=3.1.2" },
     { name = "pydantic", specifier = ">=2.13,<3" },
+    { name = "treescope", marker = "extra == 'all'" },
     { name = "treescope", marker = "extra == 'treescope'" },
     { name = "typing-extensions" },
 ]
-provides-extras = ["treescope", "transport"]
+provides-extras = ["all", "treescope", "transport"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -3,8 +3,9 @@
 This document is the semantic authority for nshconfig 2.2. The library is a
 small lifecycle layer over Pydantic for typed ML-run configuration. Pydantic
 owns schemas, aliases, validation, serialization, and JSON Schema. nshconfig
-adds an explicit mutable draft state and declaration-ordered Python
-interpolation.
+re-exports Pydantic's non-deprecated authoring API so applications can use one
+namespace, then adds an explicit mutable draft state and declaration-ordered
+Python interpolation.
 
 ## States and public surface
 
@@ -34,7 +35,7 @@ not validation operations. `config_finalize()` is non-destructive: the original
 draft remains editable and may be finalized repeatedly. Calling it on a final
 raises `DraftError`.
 
-The public package surface is intentionally small:
+The nshconfig-native lifecycle surface is intentionally small:
 
 - `Config`
 - `Context`
@@ -42,6 +43,12 @@ The public package surface is intentionally small:
 - `is_draft()`
 - `DraftError`
 - `UnsetError`
+
+The package also re-exports Pydantic's non-deprecated public authoring API at the
+supported Pydantic floor, including `Field`, `ConfigDict`, validators,
+serializers, constraints, `TypeAdapter`, and `ValidationError`. These names are
+the identical Pydantic objects, not nshconfig wrappers. Deprecated Pydantic v1
+compatibility names and Pydantic's version constants are not re-exported.
 
 There is no top-level draft or finalize function, provenance API, run-record
 format, fingerprint API, loader, registry, decorator, code generator, or global
@@ -58,8 +65,10 @@ The base class enforces settings needed by the lifecycle:
 - validation by aliases and canonical field names
 - `from_attributes=False`
 
-`strict=True` is the default policy and may be changed by a project base class.
-Lifecycle settings may not be disabled.
+`strict=True` and `use_attribute_docstrings=True` are default policies and may be
+changed by a project base class. Attribute docstrings become field descriptions
+when Pydantic can inspect the class source; an explicit `Field(description=...)`
+takes precedence. Lifecycle settings may not be disabled.
 
 Normal constructors and `model_validate()` retain Pydantic semantics. In
 particular, model validators are trusted code. A model-after validator may mutate
@@ -224,6 +233,13 @@ Draft serialization is rejected in the Config core schema, including
 concrete values only. There is no `thaw()` operation: the original draft is the
 only faithful executable recipe for later edits.
 
+The optional trusted cloudpickle transport supports notebook-local Config
+classes with eager annotations, quoted forward references, or
+`from __future__ import annotations`. Config validators and serializers defer
+their own reconstruction until cloudpickle has restored the complete dynamic
+class. The behavior is local to Config classes; importing nshconfig installs no
+global pickle reducer and does not alter unrelated Pydantic models.
+
 ## Project composition convention
 
 Reusable project helpers are ordinary in-place mutators that return the same
@@ -256,5 +272,7 @@ and helper functions retain the concrete Config type. Static typing does not
 distinguish a draft from a final; lifecycle misuse is a runtime error.
 
 The library supports Python 3.10 through 3.14 and Pydantic 2.13 through the
-latest Pydantic 2.x release. Eager annotations are required. Do not use
-`from __future__ import annotations`; quote only names defined later.
+latest Pydantic 2.x release. Eager annotations, explicit quoted forward
+references, and `from __future__ import annotations` are supported. Annotation
+resolution otherwise follows Pydantic: names must be resolvable when the schema
+is built, or the application must call `model_rebuild()` after defining them.

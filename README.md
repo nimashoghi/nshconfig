@@ -8,8 +8,8 @@ Typed, Python-first configuration for ML runs, built on
 - explicit mutable drafts for assembling incomplete configuration;
 - declaration-ordered Python interpolation over canonical validated values.
 
-There is no YAML language, registry, loader, code generator, provenance layer, or
-Pydantic re-export layer.
+There is no YAML language, registry, loader, code generator, or provenance layer.
+Pydantic's authoring API is re-exported so one `import nshconfig as C` is enough.
 
 **[Documentation](https://nima.sh/nshconfig/)** | **[Semantic design](https://github.com/nimashoghi/nshconfig/blob/main/DESIGN.md)**
 
@@ -19,6 +19,7 @@ Pydantic re-export layer.
 pip install --pre nshconfig
 pip install --pre 'nshconfig[treescope]'   # rich notebook rendering
 pip install --pre 'nshconfig[transport]'   # trusted cloudpickle transport
+pip install --pre 'nshconfig[all]'         # both optional features
 ```
 
 `nshconfig` supports Python 3.10 through 3.14 and Pydantic 2.13 through the
@@ -74,16 +75,13 @@ validated until `config_finalize()`.
 dependency order:
 
 ```python
-from pydantic import Field
-
-
 class Norm(C.Config):
     dim: int = C.interp(lambda context: context.parent(Model).dim)
 
 
 class Model(C.Config):
     dim: int = 768
-    norm: Norm = Field(default_factory=Norm.config_draft)
+    norm: Norm = C.Field(default_factory=Norm.config_draft)
 
 
 assert Model().norm.dim == 768
@@ -94,7 +92,7 @@ The callable may use `context.current()`, `parent()`, `root()`, or
 validation has finished. The interpolation result then runs through the target
 field's normal validation pipeline.
 
-Use `Field(default_factory=Child.config_draft)` when a default child needs its
+Use `C.Field(default_factory=Child.config_draft)` when a default child needs its
 parent's interpolation context. A direct `Child()` default must be valid on its
 own when the parent class body executes.
 
@@ -126,11 +124,16 @@ registry.
 ## Pydantic behavior
 
 Pydantic owns fields, aliases, validators, constraints, serialization, JSON
-Schema, and normal constructors. Import those APIs directly from `pydantic`.
+Schema, and normal constructors. nshconfig re-exports Pydantic's non-deprecated
+authoring API unchanged, so use `C.Field`, `C.ConfigDict`, `C.field_validator`,
+`C.TypeAdapter`, and the rest from the same namespace. Direct Pydantic imports
+remain equivalent.
 
 The base config is strict, forbids extras, validates defaults, revalidates model
-instances, and is shallowly field-frozen. A project base class may change policy
-such as strictness, but not lifecycle settings.
+instances, uses attribute docstrings as field descriptions, and is shallowly
+field-frozen. A project base class may change policy such as strictness, but not
+lifecycle settings. Attribute descriptions require inspectable class source;
+`C.Field(description=...)` is the explicit fallback and takes precedence.
 
 Model validators retain native Pydantic semantics. Model-after hooks may mutate
 or replace values, which can make an interpolated relationship stale. Likewise,
@@ -147,15 +150,17 @@ and the same field-value hashing rule as frozen Pydantic models: they are hashab
 exactly when all field values are hashable. Freezing is shallow, so lists,
 dictionaries, sets, and arbitrary objects retain ordinary Python mutability.
 
-The public package API is `Config`, `Context`, `interp`, `is_draft`, `DraftError`,
-and `UnsetError`, plus `__version__`.
+The native lifecycle API is `Config`, `Context`, `interp`, `is_draft`,
+`DraftError`, and `UnsetError`, plus `__version__`; the remaining public names
+are Pydantic authoring re-exports.
 
 ## Trusted executable transport
 
 Cloudpickle can transport notebook-local classes, drafts, and interpolation
 callables between compatible trusted environments. Pickle data can execute code;
 never load it from an untrusted source. A final contains concrete values and cannot
-recreate the original draft recipe.
+recreate the original draft recipe. Both normal annotations and
+`from __future__ import annotations` are supported.
 
 See the [semantic design](https://github.com/nimashoghi/nshconfig/blob/main/DESIGN.md)
 for the complete lifecycle and validation contract.

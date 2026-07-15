@@ -28,6 +28,11 @@ from typing_extensions import TypeAliasType
 import nshconfig as C
 
 
+class _DocumentedConfig(C.Config):
+    batch_size: int = 32
+    """Number of examples processed in one optimization step."""
+
+
 def test_builtin_policy_is_strict_and_forbids_extra_input() -> None:
     class Builtin(C.Config):
         count: int
@@ -39,6 +44,18 @@ def test_builtin_policy_is_strict_and_forbids_extra_input() -> None:
     with pytest.raises(ValidationError) as extra:
         Builtin.model_validate({"count": 1, "unknown": 2})
     assert extra.value.errors()[0]["type"] == "extra_forbidden"
+
+
+def test_builtin_policy_uses_attribute_docstrings_as_descriptions() -> None:
+    assert _DocumentedConfig.model_config["use_attribute_docstrings"] is True
+    description = "Number of examples processed in one optimization step."
+    assert _DocumentedConfig.model_fields["batch_size"].description == description
+    assert (
+        _DocumentedConfig.model_json_schema()["properties"]["batch_size"][
+            "description"
+        ]
+        == description
+    )
 
 
 @pytest.mark.parametrize(

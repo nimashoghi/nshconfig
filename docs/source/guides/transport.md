@@ -28,6 +28,12 @@ Drafts retain their assigned values and interpolation callables. Finals retain
 their concrete validated values. A final does not become a draft and cannot
 reconstruct the original composition recipe.
 
+Config classes may use eager annotations, quoted forward references, or
+`from __future__ import annotations`. During by-value transport, each Config
+class defers reconstruction of its own Pydantic core validator and serializer
+until cloudpickle has restored the full dynamic class. This avoids partially
+materialized cyclic schemas without imposing a special annotation style.
+
 Importing nshconfig does not install global pickle reducers for Pydantic core
 types. Unrelated Pydantic models keep their normal pickle behavior.
 

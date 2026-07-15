@@ -28,7 +28,7 @@ Interpolation errors report the target path and callable site. Common causes are
 - mutating a read-only built-in container view;
 - raising inside the user callable.
 
-Reorder source fields before dependent fields. Use `Field(default_factory=Child.config_draft)`
+Reorder source fields before dependent fields. Use `C.Field(default_factory=Child.config_draft)`
 when a default child needs parent context.
 
 ## Structural graph failures

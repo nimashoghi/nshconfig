@@ -6,13 +6,11 @@ description: Builds typed Python configuration with explicit nshconfig drafts, n
 # Using nshconfig
 
 Treat [DESIGN.md](DESIGN.md) as the semantic authority. `nshconfig` is a small
-lifecycle layer over Pydantic, not a replacement for Pydantic authoring APIs.
+lifecycle layer over Pydantic and re-exports Pydantic's authoring APIs unchanged.
 
 ## Canonical workflow
 
 ```python
-from pydantic import Field
-
 import nshconfig as C
 
 
@@ -22,7 +20,7 @@ class Norm(C.Config):
 
 class Model(C.Config):
     dim: int = 768
-    norm: Norm = Field(default_factory=Norm.config_draft)
+    norm: Norm = C.Field(default_factory=Norm.config_draft)
 
 
 class Run(C.Config):
@@ -85,7 +83,7 @@ Templates retain a minimal raw-constructor recipe. A final created by
 recipe was captured is not a valid template. Do not rely on source inspection or
 factory-call analysis.
 
-Use `Field(default_factory=Child.config_draft)` when the child has interpolation
+Use `C.Field(default_factory=Child.config_draft)` when the child has interpolation
 that needs its parent. A direct `Child()` default must validate without a parent
 while the class body executes. Defaults and factories may run again when a
 template is realized, so keep them deterministic and free of external side
@@ -114,11 +112,15 @@ field value, not inside a built-in container.
 
 ## Pydantic rules and footguns
 
-- Import `Field`, `ConfigDict`, validators, serializers, and other authoring APIs
-  from `pydantic`.
+- Use `C.Field`, `C.ConfigDict`, validators, serializers, constraints, and
+  `C.TypeAdapter` from the nshconfig namespace. These are direct Pydantic
+  re-exports; importing them from `pydantic` is equivalent.
 - Validation is strict by default. Project bases may change policy settings such
   as strictness or `arbitrary_types_allowed`, but cannot disable lifecycle
   settings or override reserved lifecycle methods.
+- Attribute docstrings are field descriptions by default when class source is
+  available. `C.Field(description=...)` takes precedence and works without source
+  inspection.
 - Model-after validators may mutate or replace the result. This can make earlier
   interpolation stale; nshconfig does not run a second pass.
 - `final.model_copy()` and `model_copy(update=...)` follow Pydantic. Updates are
@@ -131,9 +133,10 @@ field value, not inside a built-in container.
 - Config structure must have concrete annotations. Do not hide a Config in
   `Any`, `object`, or an incompatible built-in container position. Ordinary user
   objects are opaque and are not crawled for lifecycle values.
-- Do not use `from __future__ import annotations`. Quote only genuine forward
-  references. Eager annotations preserve notebook and cloudpickle behavior across
-  supported Python versions.
+- Eager annotations, quoted forward references, and
+  `from __future__ import annotations` are supported, including trusted
+  cloudpickle transport of notebook-local Config classes. Unresolved names follow
+  normal Pydantic `model_rebuild()` rules.
 
 ## Project composition
 

@@ -9,7 +9,6 @@ from pathlib import Path
 
 import cloudpickle
 from packaging.version import Version
-from pydantic import field_validator
 
 import nshconfig as C
 
@@ -22,7 +21,7 @@ class ImportableRun(C.Config):
     width: int
     leaf: ImportableLeaf
 
-    @field_validator("width")
+    @C.field_validator("width")
     @classmethod
     def normalize_width(cls, value: int) -> int:
         return abs(value)
@@ -122,13 +121,12 @@ assert cloudpickle.loads(cloudpickle.dumps(model)) == model
 
 
 _LOCAL_SENDER = """
-# Deliberately use eager annotations. Notebook classes intended for by-value
-# transport follow nshconfig's no-PEP-563 contract.
+from __future__ import annotations
+
 import os
 from pathlib import Path
 
 import cloudpickle
-from pydantic import field_validator
 
 import nshconfig as C
 
@@ -141,7 +139,7 @@ class LocalRun(C.Config):
     width: int
     leaf: LocalLeaf
 
-    @field_validator("width")
+    @C.field_validator("width")
     @classmethod
     def normalize_width(cls, value: int) -> int:
         return abs(value)
@@ -195,3 +193,28 @@ def test_notebook_local_classes_cross_a_process_with_cloudpickle(tmp_path: Path)
 
     _run_python(_LOCAL_SENDER, env=env)
     _run_python(_LOCAL_RECEIVER, env=env)
+
+
+def test_late_reference_and_forced_schema_rebuild_survive_transport() -> None:
+    script = """
+from __future__ import annotations
+
+import cloudpickle
+
+import nshconfig as C
+
+
+class Parent(C.Config):
+    child: Child
+
+
+class Child(C.Config):
+    value: int = 1
+
+
+assert Parent.model_rebuild() is True
+Parent.model_rebuild(force=True)
+restored = cloudpickle.loads(cloudpickle.dumps(Parent.config_draft()))
+assert restored.config_finalize() == Parent(child=Child())
+"""
+    _run_python(script)

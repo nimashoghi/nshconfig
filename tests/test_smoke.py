@@ -1,4 +1,4 @@
-"""The small public API and one complete notebook-style workflow."""
+"""The native lifecycle API and one complete notebook-style workflow."""
 
 import pytest
 from pydantic import ValidationError
@@ -7,9 +7,9 @@ import nshconfig as C
 from tests.scenario import ModelConfig, TrainConfig
 
 
-def test_public_api_is_deliberately_small():
+def test_public_api_combines_a_small_lifecycle_with_pydantic_authoring():
     assert C.__version__ == "2.2.0a0"
-    assert C.__all__ == [
+    assert {
         "Config",
         "Context",
         "DraftError",
@@ -17,9 +17,10 @@ def test_public_api_is_deliberately_small():
         "__version__",
         "interp",
         "is_draft",
-    ]
-    assert not hasattr(C, "Field")
-    assert not hasattr(C, "BaseModel")
+    } < set(C.__all__)
+    assert C.ValidationError is ValidationError
+    assert C.Field.__module__.startswith("pydantic")
+    assert C.BaseModel.__module__.startswith("pydantic")
     assert not hasattr(C, "thaw")
     assert not hasattr(C, "draft")
     assert not hasattr(C, "finalize")

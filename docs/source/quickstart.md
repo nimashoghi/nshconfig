@@ -2,16 +2,16 @@
 
 ## Define Pydantic schemas
 
-Import Pydantic authoring APIs from Pydantic and subclass `C.Config`:
+Import nshconfig once and subclass `C.Config`. Pydantic authoring APIs are
+available from the same namespace:
 
 ```python
-from pydantic import Field
-
 import nshconfig as C
 
 
 class Optimizer(C.Config):
-    learning_rate: float = Field(default=3e-4, gt=0)
+    learning_rate: float = C.Field(default=3e-4, gt=0)
+    """Optimizer step size."""
 
 
 class Norm(C.Config):
@@ -20,7 +20,7 @@ class Norm(C.Config):
 
 class Model(C.Config):
     dim: int = 768
-    norm: Norm = Field(default_factory=Norm.config_draft)
+    norm: Norm = C.Field(default_factory=Norm.config_draft)
 
 
 class Run(C.Config):
@@ -29,9 +29,11 @@ class Run(C.Config):
     model: Model = Model()
 ```
 
-`Field(default_factory=Norm.config_draft)` defers the child until `Model` has an
+`C.Field(default_factory=Norm.config_draft)` defers the child until `Model` has an
 active validation context. The normal `Optimizer()` and `Model()` finals are
-templates when their parent becomes a draft.
+templates when their parent becomes a draft. Validation is strict by default,
+and attribute docstrings become field descriptions when class source is
+available.
 
 ## Compose a draft
 

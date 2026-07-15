@@ -76,6 +76,7 @@ _RESERVED_METHODS = frozenset(
         "model_dump",
         "model_dump_json",
         "model_fields_set",
+        "model_rebuild",
         "model_validate",
         "model_validate_json",
         "model_validate_strings",
@@ -326,6 +327,31 @@ class Config(BaseModel):
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
         super().__pydantic_init_subclass__(**kwargs)
         _validate_config_class(cls)
+        from .transport import defer_config_val_sers
+
+        defer_config_val_sers(cls)
+
+    @classmethod
+    @override
+    def model_rebuild(
+        cls,
+        *,
+        force: bool = False,
+        raise_errors: bool = True,
+        _parent_namespace_depth: int = 2,
+        _types_namespace: Mapping[str, Any] | None = None,
+    ) -> bool | None:
+        result = super().model_rebuild(
+            force=force,
+            raise_errors=raise_errors,
+            _parent_namespace_depth=_parent_namespace_depth,
+            _types_namespace=_types_namespace,
+        )
+        if cls.__pydantic_complete__:
+            from .transport import defer_config_val_sers
+
+            defer_config_val_sers(cls)
+        return result
 
     @classmethod
     def config_draft(cls) -> Self:

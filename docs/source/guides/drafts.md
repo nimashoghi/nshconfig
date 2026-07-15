@@ -96,16 +96,13 @@ A direct `Child()` default is validated while the parent class body executes. It
 cannot read a parent that does not yet exist. Defer such a child as a draft:
 
 ```python
-from pydantic import Field
-
-
 class Child(C.Config):
     copied: int = C.interp(lambda context: context.parent(Parent).source)
 
 
 class Parent(C.Config):
     source: int = 3
-    child: Child = Field(default_factory=Child.config_draft)
+    child: Child = C.Field(default_factory=Child.config_draft)
 ```
 
 The factory runs in the parent's field pipeline. `Parent().child.copied` is `3`,

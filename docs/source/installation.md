@@ -18,16 +18,27 @@ Install optional features only where they are needed:
 ```bash
 pip install --pre 'nshconfig[treescope]'   # rich notebook rendering
 pip install --pre 'nshconfig[transport]'   # cloudpickle transport
+pip install --pre 'nshconfig[all]'         # both optional features
 ```
 
-Pydantic remains the schema API. Import `Field`, `ConfigDict`, validators, and
-other Pydantic features directly:
+Pydantic remains the schema API. nshconfig re-exports its non-deprecated
+authoring surface unchanged, so application schemas need only one import:
 
 ```python
-from pydantic import ConfigDict, Field, field_validator
-
 import nshconfig as C
+
+
+class Job(C.Config):
+    model_config = C.ConfigDict(strict=False)
+    workers: int = C.Field(gt=0)
+
+    @C.field_validator("workers")
+    @classmethod
+    def check_workers(cls, value: int) -> int:
+        return value
 ```
+
+Direct imports from `pydantic` remain equivalent.
 
 [basedpyright](https://docs.basedpyright.com/) is the supported type checker. See
 the [typing guide](guides/typing.md) for the checked and runtime-only parts of the

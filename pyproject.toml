@@ -30,6 +30,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+all = ["cloudpickle>=3.1.2", "treescope"]
 treescope = ["treescope"]
 transport = ["cloudpickle>=3.1.2"]
 

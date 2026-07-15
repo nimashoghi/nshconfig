@@ -27,5 +27,3 @@ work.norm.dim = C.interp(  # BAD[reportAttributeAccessIssue]
 work.norm.dmi = 3  # BAD[reportAttributeAccessIssue]
 work.dim = "1024"  # BAD[reportAttributeAccessIssue]
 bad_result: str = work.config_finalize()  # BAD[reportAssignmentType]
-
-C.Field(default=1)  # BAD[reportAttributeAccessIssue]

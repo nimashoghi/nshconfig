@@ -7,8 +7,8 @@ the library and `SKILL.md` gives the canonical usage workflow.
 ## Ownership and public surface
 
 Pydantic owns schema declaration, aliases, constraints, validation,
-serialization, and JSON Schema. Application code imports `Field`, validators,
-`ConfigDict`, and other authoring APIs from `pydantic`.
+serialization, and JSON Schema. nshconfig re-exports `Field`, validators,
+`ConfigDict`, and Pydantic's other non-deprecated authoring APIs unchanged.
 
 Calling `ConfigType(...)` returns an ordinary validated final.
 `ConfigType.config_draft()` creates mutable incomplete composition state, and
@@ -19,11 +19,11 @@ Normal constructor finals used as defaults are templates. A parent draft project
 default-origin Config values to fresh drafts through concrete structural
 annotations. Explicitly assigned finals remain finals.
 
-The public package surface is `Config`, `Context`, `interp`, `is_draft`,
-`DraftError`, `UnsetError`, and `__version__`. Do not add Pydantic re-exports,
-top-level draft/finalize aliases, provenance, records, fingerprints, dynamic verb
-dispatch, registries, loaders, code generation, global model settings, or global
-pickle reducers.
+The native package surface is `Config`, `Context`, `interp`, `is_draft`,
+`DraftError`, `UnsetError`, and `__version__`, plus explicit Pydantic authoring
+re-exports. Do not add top-level draft/finalize aliases, provenance, records,
+fingerprints, dynamic verb dispatch, registries, loaders, code generation, global
+model settings, or global pickle reducers.
 
 ## Semantic invariants
 
@@ -46,9 +46,9 @@ pickle reducers.
 ## Python and testing rules
 
 - Target Python 3.10-3.14 and Pydantic `>=2.13,<3`.
-- Never add `from __future__ import annotations`. Quote forward references only
-  when a name is defined later; eager annotations keep notebook and cloudpickle
-  schema transport reliable.
+- Eager annotations, quoted forward references, and
+  `from __future__ import annotations` must all work, including notebook and
+  cloudpickle schema transport.
 - Prefer small explicit functions and native Pydantic behavior over framework
   abstractions or compatibility layers.
 - Test through the public API. Update `DESIGN.md`, public tests, `README.md`, and
