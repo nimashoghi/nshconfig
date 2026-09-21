@@ -1,9 +1,7 @@
-# Semantic contract
+# Contract
 
-This is the authoritative behavioral contract for `nshconfig`. The focused guides
-explain common workflows; this page defines the complete lifecycle, ordering, and
-value-graph rules.
+The repository's canonical design contract is included below.
 
 ```{include} ../../DESIGN.md
-:start-after: "# nshconfig v2 semantic design"
+:start-line: 2
 ```

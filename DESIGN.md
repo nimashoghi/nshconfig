@@ -1,331 +1,51 @@
-# nshconfig v2 semantic design
-
-This document is the semantic authority for nshconfig 2.2. The library is a
-small lifecycle layer over Pydantic for typed ML-run configuration. Pydantic
-owns schemas, aliases, validation, serialization, and JSON Schema. nshconfig
-re-exports Pydantic's non-deprecated authoring API so applications can use one
-namespace, then adds an explicit mutable draft state, inert unbound templates,
-and declaration-ordered Python interpolation.
-
-## States and public surface
-
-A `Config` subclass has three instance states:
-
-1. An **unbound template** is an immutable constructor recipe whose interpolation
-   still needs an enclosing Config context. It is not a partially validated value.
-2. A **draft** is mutable, may be incomplete, and has not crossed the Pydantic
-   validation boundary.
-3. A **final** is the result of ordinary Pydantic validation and is field-frozen
-   through `frozen=True`.
-
-Calling a Config class normally creates a final:
-
-```python
-run = RunConfig(seed=1)
-```
-
-There is one narrow constructor-only exception. If interpolation cannot run
-because an ancestor, typed root, or nearest enclosing model does not exist yet,
-normal construction returns an unbound template. A `NameError` raised inside the
-interpolation callable may also defer a forward parent name. Every other error
-must be an omitted required field; otherwise the original Pydantic
-`ValidationError` is raised. All partially validated values are discarded.
-
-`model_validate()`, `TypeAdapter`, JSON validation, and string validation never
-create templates. They either return finals or fail validation.
-
-Draft composition uses collision-resistant Config methods:
-
-```python
-work = RunConfig.config_draft()
-work.seed = 1
-run = work.config_finalize()
-```
-
-`config_draft()` takes no values. Draft assignments are composition operations,
-not validation operations. `config_finalize()` is non-destructive: the original
-draft remains editable and may be finalized repeatedly. Calling it on a final
-raises `DraftError`; calling it on a template raises `TemplateError`.
-
-The nshconfig-native lifecycle surface is intentionally small:
-
-- `Config`
-- `Context`
-- `interp()`
-- `is_draft()`
-- `is_template()`
-- `DraftError`
-- `TemplateError`
-- `UnsetError`
-
-The package also re-exports Pydantic's non-deprecated public authoring API at the
-supported Pydantic floor, including `Field`, `ConfigDict`, validators,
-serializers, constraints, `TypeAdapter`, and `ValidationError`. These names are
-the identical Pydantic objects, not nshconfig wrappers. Deprecated Pydantic v1
-compatibility names and Pydantic's version constants are not re-exported.
-
-There is no top-level draft or finalize function, provenance API, run-record
-format, fingerprint API, loader, registry, decorator, code generator, or global
-model configuration.
-
-## Pydantic behavior
-
-The base class enforces settings needed by the lifecycle:
-
-- `extra="forbid"`
-- `frozen=True`
-- `validate_default=True`
-- `revalidate_instances="always"`
-- validation by aliases and canonical field names
-- `from_attributes=False`
+# nshconfig v3 contract
 
-`strict=True` and `use_attribute_docstrings=True` are default policies and may be
-changed by a project base class. Attribute docstrings become field descriptions
-when Pydantic can inspect the class source; an explicit `Field(description=...)`
-takes precedence. Lifecycle settings may not be disabled.
-
-Apart from the constructor-only unbound fallback above, normal constructors and
-`model_validate()` retain Pydantic semantics. Model validators are trusted code.
-A model-after validator may mutate or replace its result exactly as Pydantic
-permits. Such a validator can make types or interpolated relationships
-inconsistent; nshconfig does not run a second validation or interpolation pass
-afterward.
-
-`model_copy()` is available on finals with Pydantic semantics. Its `update=`
-values are not validated. Draft copying is rejected because copying incomplete
-mutable composition state has no clear ownership semantics. Template
-`model_copy()` is rejected because a template has no validated field values;
-normal `copy.copy()` and `copy.deepcopy()` preserve its recipe.
-`model_construct()` and Pydantic's deprecated `copy()` remain unsupported.
-
-To revalidate the concrete contents of a final, use the native spelling:
+nshconfig replaces configuration composition with typed Python. Config files build drafts, ordinary Python functions apply presets, and an entry point passes a finalized config to application code. Interpolation is the only deferred computation abstraction. There is no launcher, registry, configuration language, or provenance system.
 
-```python
-checked = type(final).model_validate(final)
-```
+## Lifecycle and typing
 
-This validates current concrete values. It does not reconstruct an old
-interpolation recipe.
+An annotated `Config` subclass defines a schema. Bare annotations declare required fields. Defaults use ordinary Python values, `Field(default_factory=...)`, or `interp(...)`. Constructors and `.draft()` both create editable drafts. Normal keyword constructors have dataclass-transform signatures, so type checkers require fields without defaults. `.draft()` takes no arguments and permits incomplete construction. Runtime writes defer value validation, including constructor keyword values. Unknown fields fail immediately.
 
-Finals use value equality over their concrete class and declared fields. Drafts
-and templates use identity equality. Both are unhashable. Finals use the same
-field-value hashing rule as a frozen Pydantic model: a final is hashable exactly
-when its field values are hashable. Hashes are ordinary process-local Python
-hashes, not stable content identifiers.
+Draft and final objects share the schema type. Type checkers check field names, values, callback results, and constructor arguments; they do not prove completeness or distinguish mutability. Runtime attribute interception is hidden from static analysis so it does not open the schema to arbitrary attributes. The test suite checks positive and negative fixtures with ty, Pyright, and mypy without plugins or generated stubs.
 
-Pydantic freezing is shallow. It blocks field rebinding but does not make a
-nested list, dictionary, set, or arbitrary object immutable. Mutable aliases and
-post-validation mutation have ordinary Pydantic consequences.
+Reading a field resolves and validates that field and its dependencies. Reading an ordinary child config checks its node type without requiring the child or root to be complete. Missing fields raise `MissingValueError`. Deleting a draft field unsets it, including fields with defaults; deletion does not restore a default.
 
-## Draft fields and provisional defaults
+`.finalize()` resolves the whole subtree, creates an independent snapshot, and runs cross-field checks. The draft remains editable with its interpolation rules. Config nodes and managed containers in the snapshot reject mutations. A subsequent draft edit or finalization cannot change a prior snapshot. `.copy()` makes an unattached editable copy: copying a draft preserves rules; copying a final preserves its already resolved values. Finals retain detached concrete validation inputs internally so copying and later container edits do not normalize those values twice; these inputs contain no interpolation rules.
 
-Reading a required scalar field that has not been assigned raises `UnsetError`.
-A required field whose direct annotation is one concrete Config type lazily
-creates a child draft. This gives required nested configurations an editable
-draft spine without running Pydantic hooks.
-
-Immutable scalar defaults may be read provisionally. Supported built-in
-container defaults are copied before exposure. A materialized default records a
-small structural baseline:
-
-- If it is untouched, finalization omits it and lets Pydantic recompute the
-  canonical default or factory result.
-- If it is mutated, finalization supplies the current value as explicit input.
-- If it contains child drafts, edits to those drafts make the branch explicit.
-
-No operation history is retained. Built-in containers remain ordinary Python
-`list`, `dict`, and `set` objects rather than tracking subclasses.
-
-Arbitrary mutable objects are opaque. A provisional opaque default that cannot
-be observed safely raises `UnsetError`; assign an explicit value instead.
+## Interpolation and validation
 
-Assignment stores an unvalidated value and marks the field explicit. Deletion
-removes explicit state and reactivates the declared default. An `interp()` marker
-may be assigned as the complete value of a Config field.
+`interp(lambda c: c.root(Run).width)` defines a whole-field computation. `Context.root(T)` selects the root and verifies its type. `nearest(T)` selects the closest enclosing Config of type T, excluding the current node and ignoring intervening containers. `current(T)` selects the current Config. Missing context and dependency cycles raise `InterpolationError`; cycle errors include the field chain. Declaration order does not constrain dependencies.
 
-## Replayable defaults and unbound templates
+Each top-level read or finalization owns a resolution session that retains strong references to every evaluated node until completion. Interpolation results are memoized within that session, never across edits or independent reads. Explicit values retain a separate canonical cache until the field or a contained value changes. Canonical normalization does not overwrite raw inputs, so a non-idempotent normalizer does not run repeatedly over its own output. Reads of dependencies see canonical values.
 
-A final created through normal `Config(...)` construction retains a private
-construction recipe consisting of copied raw keyword input and an integrity
-token. This metadata is not part of equality, hashing, schemas, or serialization.
-It is not Python source or an AST. Such a final can be a **replayable default**:
+Callbacks and field normalizers must be pure. They may read their config tree but cannot mutate it while it is resolving. External I/O, environment reads, randomness, and side effects should happen in ordinary builder code before finalization. Configs are single-writer objects; simultaneous mutation and resolution from different threads is unsupported. Independent trees and completed snapshots can be read concurrently.
 
-```python
-class Child(Config):
-    width: int = 128
-
+Scalar reads are ordinary Python snapshots. Assigning a scalar replaces a rule; `cfg.width += 1` evaluates the rule and pins the result. Interpolated Configs and containers are completed, read-only computed values. Replace the whole field with an editable draft to customize it. Existing Config nodes returned by a callback resolve in their source context and are copied. Nodes constructed or copied during that callback resolve in the destination context; a captured standalone config remains in its source context. Results never take ownership of source nodes.
 
-DEFAULT_CHILD = Child(width=256)
-
-
-class Parent(Config):
-    child: Child = DEFAULT_CHILD
-```
-
-Inline and named defaults follow the same rule. A recipe-less final, or a final
-whose declared value graph changed after recipe capture, is rejected rather than
-guessed from its validated values. Pydantic may copy a declared default; normal
-shallow and deep copies preserve an intact recipe, including when the Config has
-unhashable fields.
-
-A child whose interpolation needs its parent uses the same direct syntax:
-
-```python
-class ParentDependentChild(Config):
-    copied: int = interp(lambda context: context.parent(Parent).source)
-
-
-class Parent(Config):
-    source: int = 1
-    child: ParentDependentChild = ParentDependentChild()
-```
-
-The `ParentDependentChild()` call first attempts ordinary standalone Pydantic
-validation. The missing parent makes it an unbound template containing only the
-raw constructor recipe and concise reasons it could not bind. It contains no
-canonical field values. During `Parent()` validation, nshconfig replays that
-recipe under the active parent and the result is a normal final child.
-
-A missing ancestor, typed root, or nearest enclosing model is deferrable. A
-`NameError` inside interpolation is also deferrable so a lambda may refer to the
-parent class being defined later. When a template is bound, a repeated
-`NameError` becomes an ordinary interpolation error; a misspelled name cannot
-turn the enclosing parent into another template. Current/parent selector type
-mismatches, later-field reads, validator failures, extra inputs, strict type
-failures, and all other errors remain immediate.
-
-Missing required fields may coexist with at least one unbound interpolation in a
-template. A parent draft can project the template to a child draft and fill those
-slots. Missing required fields by themselves do not create templates.
-
-Both replayable final defaults and unbound templates become fresh drafts when a
-parent draft materializes a default-origin graph. Projection and binding recurse
-through concrete annotated positions:
-
-- direct Config fields;
-- supported unions;
-- list and tuple elements;
-- mapping values and TypedDict values.
-
-Mapping keys and set or frozenset members cannot contain drafts or templates
-because both lifecycle states are unhashable. Explicit finals assigned to a
-draft or passed to a constructor never undergo default projection. An explicitly
-passed template does bind in a concrete annotated Config position.
-
-When a replayable final or template is realized, its recipe re-enters the
-ordinary child Pydantic pipeline under the parent's active context. Validators,
-default factories, `model_post_init`, and model validators may therefore run once
-before constructor fallback and again during binding. Configuration hooks should
-be deterministic and side-effect-free.
-
-Default factories remain ordinary Pydantic factories only when they return
-concrete values or validated finals. A factory that returns a draft or unbound
-template is rejected. In particular,
-`Field(default_factory=Child.config_draft)` is unsupported: use the direct
-`child: Child = Child()` spelling.
-
-An unbound template is an inert recipe, not a value. Declared field access,
-mutation, deletion, iteration, finalization, `model_copy()`, and Pydantic or JSON
-serialization raise `TemplateError` directly or a Pydantic serialization error at
-the core serializer boundary. `repr()`, Treescope rendering, `is_template()`,
-normal shallow/deep copy, and trusted pickle or cloudpickle transport are
-supported. Template equality is identity equality.
-
-## Interpolation
-
-`interp()` stores a whole-field Python callable. The callable receives a
-read-only `Context` and returns the input for that field's normal Pydantic
-pipeline.
-
-Field declaration order is dependency order. For each field:
-
-1. Pydantic chooses explicit input, a default, or a default factory.
-2. An interpolation marker is evaluated if present.
-3. The complete Pydantic field pipeline validates the resulting input.
-4. The canonical field value becomes visible to later interpolation.
-
-Model-before validators run before this field sequence. Field validators retain
-their native order. Post-init and model-after hooks run after all fields.
-
-Interpolation may read only canonical fields whose validation is complete.
-Reading the active field or a later field fails with a path-bearing validation
-error. Nested Config validation establishes parent and root context. Independent
-nested validation starts a fresh root and restores the outer context afterward.
-If an earlier interpolation is unbound, later interpolation that reads it is also
-marked unbound instead of producing a misleading declaration-order error.
-
-Config fields and supported built-in containers use read-only context behavior.
-Returning a container view materializes an independent value; returning an active
-incomplete Config branch is rejected. Arbitrary user objects remain opaque and
-retain their normal identity and behavior. An explicit field value overrides an
-interpolation default. Deleting the explicit draft value reactivates the marker.
-
-## Validation boundary and structural graph
-
-Finalization recursively collects the declared Config graph, resolves defaults
-and interpolation through Pydantic, and returns a fresh final. No draft, unbound
-template, or interpolation marker may survive in an annotated Config position or
-supported built-in container.
-
-Config structure must be described by concrete annotations. A Config, including
-an unbound template, hidden under `Any`, `object`, or an incompatible structural
-position is rejected because Pydantic cannot validate it with the correct parent
-context. Arbitrary user objects themselves are opaque; nshconfig does not crawl
-their `__dict__`, slots, or private caches looking for lifecycle values.
-
-Built-in input cycles are rejected with a path. Ordinary mutable aliasing is
-allowed and follows Pydantic semantics. The validation boundary does not claim
-deep immutability.
-
-Draft and template serialization is rejected in the Config core schema,
-including `TypeAdapter` and nested Pydantic serialization paths. A completed
-final contains concrete values only. There is no `thaw()` operation: the
-original draft is the only faithful executable recipe for later edits.
-
-The optional trusted cloudpickle transport supports notebook-local Config
-classes, drafts, finals, templates, and interpolation callables with eager
-annotations, quoted forward references, or `from __future__ import annotations`.
-Config validators and serializers defer their own reconstruction until
-cloudpickle has restored the complete dynamic class. The behavior is local to
-Config classes; importing nshconfig installs no global pickle reducer and does
-not alter unrelated Pydantic models.
-
-## Project composition convention
-
-Reusable project helpers are ordinary in-place mutators that return the same
-draft for composition:
-
-```python
-def resnet50(cfg: ModelConfig, *, d_model: int = 256) -> ModelConfig:
-    cfg.d_model = d_model
-    return cfg
-```
-
-Projects should place reusable mutators under `src/project/configs/`. Root files
-under `configs/` expose the same contract through `__config__`:
-
-```python
-def __config__(cfg: TrainConfig) -> TrainConfig:
-    resnet50(cfg.model)
-    return cfg
-```
-
-The application owns file loading. It creates the expected root draft, calls
-`__config__`, verifies that the returned object is the identical draft, and
-finalizes exactly once. nshconfig does not provide a loader or registry.
-
-## Typing contract
-
-Pydantic's dataclass transform continues to describe `Config(...)` construction.
-Its static return type remains the concrete Config type even when the narrow
-runtime fallback creates an unbound template. `config_draft()` and
-`config_finalize()` return `Self`, so fields and helper functions retain the
-concrete Config type. Static typing does not distinguish a template, draft, or
-final; lifecycle misuse is a runtime error. A typed selector may refer to a
-parent class defined later, including under future annotations.
-
-The library supports Python 3.10 through 3.14 and Pydantic 2.13 through the
-latest Pydantic 2.x release. Eager annotations, explicit quoted forward
-references, and `from __future__ import annotations` are supported. Annotation
-resolution otherwise follows Pydantic: names must be resolvable when the schema
-is built, or the application must call `model_rebuild()` after defining them.
+Pydantic TypeAdapter provides strict field validation, `Annotated` constraints, `BeforeValidator`, `AfterValidator`, `Field`, and `StringConstraints`. nshconfig is not a Pydantic BaseModel and does not expose its unrestricted model mutation/serialization API. Field normalizers are field-local; cross-field derivations use interpolation. Container normalization can normalize leaves but must preserve shape, mapping keys, and Config node identities. Compute a differently shaped container with interpolation or builder code.
+
+`@check` marks an instance method returning `None`. Finalization runs these methods after all values are resolved, on the frozen snapshot. A check may raise an error but cannot rewrite the graph or return a replacement. Inherited checks run unless overridden; overriding a check requires decorating the replacement if it should still be a check. Ordinary field reads do not run whole-model checks. Reading a computed subtree checks that completed subtree.
+
+## Ownership and containers
+
+Each explicit Config child has one owner. Assignment preserves its identity, and edits through an existing reference affect the attached child. Reuse requires `.copy()`. Replacing or removing a child detaches it. Class-declared defaults are recursively copied for each new parent, including container defaults. Ownership changes are checked before committing a mutation; duplicates, structural cycles, and competing owners fail without partially attaching incoming children.
+
+Incoming plain lists and dictionaries are copied recursively into managed mutable sequences and mappings. Config elements retain their identity and ownership requirements. Aliases to the original plain containers do not affect the config. Aliases obtained by reading config fields remain live, including nested container aliases. List indexing, slicing, append/extend, removal, reverse/sort, and dictionary mutation use the managed boundary. Augmented assignment retains the managed field identity. Duplicate Config elements are rejected, including list multiplication that would duplicate ownership.
+
+The public annotations remain `list[T]` and `dict[K, V]` for familiar static typing. Runtime values implement `MutableSequence` and `MutableMapping`; they are not built-in list/dict instances. Use `.to_dict()` on a final or `list(...)`/`dict(...)` when an external API requires concrete built-ins. Private attributes and explicitly bypassing Python attribute hooks are outside the read-only contract.
+
+Tuples may contain managed containers and Config nodes. Frozen sets may contain supported immutable leaves. Mutable sets and arbitrary mutable opaque objects are outside the supported value graph and fail at finalization. Supported immutable leaves include scalar primitives, enums with immutable values, paths, dates/times/durations, Decimal, UUID, ranges, and types. There is no claim to freeze arbitrary user-defined objects. Represent mutable configuration state with Config, list, dict, or tuple.
+
+## Export, annotations, and transport
+
+A final supports `.to_dict()` for detached ordinary Python containers and `.to_json()` for JSON with Pydantic scalar encodings. Draft export requires explicit finalization. There is no implicit dict-to-schema conversion: construct typed child configs in Python.
+
+Eager annotations, quoted references, postponed annotations, and Python 3.14 annotations are supported. Module-level forward types resolve when fields are first read. Use `Schema.rebuild(namespace={"Child": Child})` for late function-local references. Each annotation resolves in its declaring class/module namespace. Concrete resolved annotations are retained on the class; compiled Pydantic adapters are process-local and excluded from class transport state.
+
+Standard pickle supports importable schemas. The optional `transport` extra supplies cloudpickle for notebook-defined schemas and interpolation callbacks. These are trusted executable Python payloads for short-lived transport, not stable archival formats. Import does not install global pickle reducers. Subprocess transport tests run across the supported Python/Pydantic matrix.
+
+## Implementation boundaries
+
+`_src/schema.py` handles declarations, annotation resolution, defaults, and compiled field adapters. `_src/runtime.py` owns the draft tree, managed containers, resolution sessions, ownership transactions, snapshots, and checks. The public surface is explicitly exported in `nshconfig/__init__.py`.
+
+v3 intentionally removes the v2 template/final-constructor lifecycle, declaration-order interpolation, `config_draft`/`config_finalize`, unrestricted Pydantic authoring re-exports, shallow finals, and treescope integration. No v2 compatibility layer is maintained.

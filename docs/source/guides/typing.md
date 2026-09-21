@@ -1,60 +1,11 @@
 # Typing
 
-`Config` uses Pydantic's dataclass transform for ordinary construction. The two
-lifecycle methods return `Self`:
+nshconfig uses standard annotations and `dataclass_transform`. ty, Pyright, and mypy check synthesized keyword constructors, field assignment, nested access, contextual selectors, and interpolation return types. No plugin or generated stub is needed.
 
-```python
-work = Model.config_draft()       # inferred as Model
-final = work.config_finalize()    # inferred as Model
-```
+Bare annotations declare required fields. Normal constructors require them statically. `.draft()` takes no arguments and returns the exact subclass type while permitting incremental initialization. Constructors and `.draft()` share draft runtime semantics.
 
-Static typing intentionally does not distinguish an unbound template, draft, or
-final. `Child()` retains the static type `Child` even when missing parent context
-causes the narrow runtime template fallback. The same typed object flows through
-project mutators, while lifecycle misuse fails at runtime.
+Drafts and finals have the same public schema type. Completeness and read-only state are runtime guarantees, not separate static types. Managed sequences/mappings retain familiar list/dict annotations but are wrapper objects at runtime.
 
-```python
-def resnet50(cfg: Model, *, dim: int = 256) -> Model:
-    cfg.dim = dim
-    return cfg
-```
+Use eager, quoted, or postponed annotations. Module-level forward references resolve once their definitions exist. For late function-local types, call `Schema.rebuild(namespace={"Child": Child})` after defining them.
 
-Draft field assignments are checked against declared field types. Runtime draft
-assignment remains unvalidated, so a suppressed type error still fails during
-finalization.
-
-## Typed interpolation context
-
-Pass the expected Config type to a selector for checked field access:
-
-```python
-class Leaf(C.Config):
-    copied: int = C.interp(lambda context: context.parent(Model).dim)
-```
-
-`current(Model)`, `parent(Model)`, `parent(2, Model)`, `root(Run)`, and
-`nearest(Model)` return the requested static type. Selector reachability and field
-declaration order remain runtime properties.
-
-## Annotation evaluation
-
-Normal eager annotations, explicit quoted forward references, and
-`from __future__ import annotations` are all supported across Python 3.10 through
-3.14. The optional trusted cloudpickle transport also supports these forms for
-notebook-local Config classes.
-
-Name resolution otherwise follows Pydantic. If an annotation refers to a name
-that is still unavailable when the class is created, define the name and call
-`ConfigType.model_rebuild()` using the same rules as an ordinary Pydantic model.
-
-Names used only inside an interpolation lambda are resolved when the callable
-runs, so a later parent class may be referenced without turning the field
-annotation into a string. During the parent class body, the first unresolved
-`NameError` creates an unbound child template; binding reruns the callable after
-the parent name exists. A repeated `NameError` then fails validation normally.
-
-## Supported checker
-
-[basedpyright](https://docs.basedpyright.com/) is the checked contract. The
-repository includes positive and negative golden probes under
-`tests/typing_probes/`. Diagnostic changes are treated as typing behavior changes.
+The development test suite checks positive fixtures and exact expected error lines across all three checkers. Library implementation typing is checked separately with basedpyright.

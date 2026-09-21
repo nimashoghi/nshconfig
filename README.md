@@ -1,185 +1,76 @@
-# nshconfig
+# nshconfig v3
 
-Typed, Python-first configuration for ML runs, built on
-[Pydantic](https://docs.pydantic.dev/).
-
-`nshconfig` adds two ideas to ordinary Pydantic models:
-
-- explicit mutable drafts for assembling incomplete configuration;
-- declaration-ordered Python interpolation over canonical validated values.
-
-There is no YAML language, registry, loader, code generator, or provenance layer.
-Pydantic's authoring API is re-exported so one `import nshconfig as C` is enough.
-
-**[Documentation](https://nima.sh/nshconfig/)** | **[Semantic design](https://github.com/nimashoghi/nshconfig/blob/main/DESIGN.md)**
-
-## Install
+Typed Python configuration with editable drafts, live interpolation, and independent read-only snapshots. Config files, presets, and execution are ordinary Python modules and functions.
 
 ```bash
-pip install --pre nshconfig
-pip install --pre 'nshconfig[treescope]'   # rich notebook rendering
-pip install --pre 'nshconfig[transport]'   # trusted cloudpickle transport
-pip install --pre 'nshconfig[all]'         # both optional features
+pip install 'nshconfig==3.0.0a0'
 ```
-
-`nshconfig` supports Python 3.10 through 3.14 and Pydantic 2.13 through the
-latest Pydantic 2.x release.
-
-## Construction and draft composition
-
-Calling a config class first performs ordinary Pydantic validation and normally
-returns a field-frozen final:
 
 ```python
 import nshconfig as C
 
+class Pairformer(C.Config):
+    c_z: int = C.interp(lambda c: c.root(Run).c_z)
 
-class Child(C.Config):
-    x: int = 1
-    y: int = 2
+class Run(C.Config):
+    project: str
+    run_name: str
+    c_z: int = 128
+    pairformer: Pairformer = Pairformer()
 
+config = Run.draft()
+config.project = "protenix"
+config.run_name = "wide"
+config.c_z = 256
+assert config.pairformer.c_z == 256
 
-class Parent(C.Config):
-    child: Child = Child()
-
-
-final = Parent(child=Child(x=10, y=20))
-assert not C.is_draft(final)
+ready = config.finalize()
+config.c_z = 384
+assert ready.pairformer.c_z == 256
+assert config.pairformer.c_z == 384
 ```
 
-Composition uses an explicit draft and one validation boundary:
+For short configs, `Run(project="protenix", run_name="wide", c_z=256)` also creates an editable draft. Constructors have checked keyword signatures; `.draft()` permits required fields to be populated later. Both use `.finalize()` before execution.
+
+## Composition is Python
 
 ```python
-work = Parent.config_draft()
-assert C.is_draft(work.child)
+def wide(config: Run) -> None:
+    config.c_z = 256
 
-work.child.x = 10
-final = work.config_finalize()
+def experiment() -> Run:
+    config = Run(project="protenix", run_name="wide")
+    wide(config)
+    return config
 
-assert final == Parent(child=Child(x=10, y=2))
-assert C.is_draft(work)  # finalization is non-destructive
+# In your ordinary Python entry point:
+# train(experiment().finalize())
 ```
 
-A normally constructed final retains enough raw input to be a replayable default.
-When its parent becomes a draft, default-origin children become fresh drafts
-recursively through annotated lists, tuples, mappings, unions, and TypedDict
-values. An explicitly assigned final remains a final.
+The runnable [Protenix case study](examples/protenix.py) demonstrates shared model dimensions, presets, nested configs, and training-set/weight validation. It is a reduced migration example, not a full Protenix conversion.
 
-Required fields with one concrete `Config` annotation lazily create child drafts.
-Reading another unset required field raises `UnsetError`. Draft writes are not
-validated until `config_finalize()`.
+## Validation and ownership
 
-## Interpolation
-
-`interp()` derives one complete field value. Pydantic field declaration order is
-dependency order:
+Writes defer validation. Reads validate requested values and their dependencies; declaration order does not matter. Use Pydantic `Annotated` metadata for field-local normalization and constraints, and `@C.check` for final cross-field checks:
 
 ```python
-class Norm(C.Config):
-    dim: int = C.interp(lambda context: context.parent(Model).dim)
+from typing import Annotated
 
+class Data(C.Config):
+    batch_size: Annotated[int, C.Field(gt=0)] = 1
+    train_sets: list[str] = ["pdb"]
+    weights: list[float] = [1.0]
 
-class Model(C.Config):
-    dim: int = 768
-    norm: Norm = Norm()
-
-
-assert Model().norm.dim == 768
+    @C.check
+    def aligned(self) -> None:
+        if len(self.train_sets) != len(self.weights):
+            raise ValueError("train_sets and weights must align")
 ```
 
-The callable may use `context.current()`, `parent()`, `root()`, or
-`nearest(ConfigType)`. It sees only earlier fields whose complete Pydantic field
-validation has finished. The interpolation result then runs through the target
-field's normal validation pipeline.
+Explicit child assignment preserves identity and requires a single owner. Use `.copy()` for reuse. Declared defaults are copied automatically per parent. Plain incoming lists/dicts become managed containers; aliases read from a config stay live. Final snapshots and computed subtrees reject nested mutation at runtime.
 
-`Norm()` first attempts ordinary standalone validation. Because its interpolation
-needs a parent that does not exist yet, it becomes an inert unbound template.
-When `Model()` is validated, the saved constructor recipe runs through Norm's
-normal Pydantic pipeline under the active model, so `dim` becomes `768`.
+The same schema type describes drafts and finals. ty, Pyright, and mypy check names and value types; completeness and read-only state are runtime guarantees. Managed list/dict values implement sequence/mapping interfaces and are not built-in list/dict instances. Arbitrary mutable opaque leaves are unsupported.
 
-This constructor fallback is deliberately narrow: at least one interpolation
-must be missing ancestor/root/nearest context or raise `NameError`, and every
-other error must be an omitted required field. Strict type errors, extras,
-validator failures, and ordinary interpolation mistakes still fail immediately.
-`model_validate()`, `TypeAdapter`, and JSON or string validation never create
-templates.
+Python 3.10-3.14 and Pydantic 2.13 through the latest 2.x are supported. Install `nshconfig[transport]` for trusted cloudpickle transport of notebook-defined schemas. v3 is an intentional breaking redesign of v2.
 
-Use direct `child: Child = Child()` defaults for both ordinary and
-parent-dependent children. Factories returning drafts or templates, including
-`C.Field(default_factory=Child.config_draft)`, are rejected.
-
-## Project composition convention
-
-Keep reusable config builders under `src/project/configs/` as ordinary in-place
-mutators:
-
-```python
-def resnet50(cfg: ModelConfig, *, d_model: int = 256) -> ModelConfig:
-    cfg.d_model = d_model
-    return cfg
-```
-
-Root files under `configs/` use the same contract:
-
-```python
-def __config__(cfg: TrainConfig) -> TrainConfig:
-    resnet50(cfg.model)
-    cfg.seed = 7
-    return cfg
-```
-
-The application owns loading. It creates the expected root draft, calls
-`__config__`, verifies that the returned object is the identical draft, and calls
-`config_finalize()` exactly once. `nshconfig` intentionally provides no loader or
-registry.
-
-## Pydantic behavior
-
-Pydantic owns fields, aliases, validators, constraints, serialization, JSON
-Schema, and normal constructors. nshconfig re-exports Pydantic's non-deprecated
-authoring API unchanged, so use `C.Field`, `C.ConfigDict`, `C.field_validator`,
-`C.TypeAdapter`, and the rest from the same namespace. Direct Pydantic imports
-remain equivalent.
-
-The base config is strict, forbids extras, validates defaults, revalidates model
-instances, uses attribute docstrings as field descriptions, and is shallowly
-field-frozen. A project base class may change policy such as strictness, but not
-lifecycle settings. Attribute descriptions require inspectable class source;
-`C.Field(description=...)` is the explicit fallback and takes precedence.
-
-Model validators retain native Pydantic semantics. Model-after hooks may mutate
-or replace values, which can make an interpolated relationship stale. Likewise,
-`final.model_copy(update=...)` does not validate its updates. To validate the
-current concrete contents of a final, use:
-
-```python
-checked = type(final).model_validate(final)
-```
-
-Drafts cannot be copied or serialized through Pydantic or JSON. Templates are
-immutable, have no readable field values, and cannot be finalized, iterated,
-model-copied, or serialized. They may be inspected with `repr()` or Treescope,
-copied with normal Python copy operations, and carried by trusted pickle or
-cloudpickle. Finals use value equality and the same field-value hashing rule as
-frozen Pydantic models: they are hashable exactly when all field values are
-hashable. Drafts and templates are unhashable. Freezing is shallow, so lists,
-dictionaries, sets, and arbitrary objects retain ordinary Python mutability.
-
-The native lifecycle API is `Config`, `Context`, `interp`, `is_draft`,
-`is_template`, `DraftError`, `TemplateError`, and `UnsetError`, plus
-`__version__`; the remaining public names are Pydantic authoring re-exports.
-
-## Trusted executable transport
-
-Cloudpickle can transport notebook-local classes, drafts, templates, and
-interpolation callables between compatible trusted environments. Pickle data can
-execute code; never load it from an untrusted source. A final contains concrete
-values and cannot recreate the original draft recipe. Both normal annotations
-and `from __future__ import annotations` are supported.
-
-See the [semantic design](https://github.com/nimashoghi/nshconfig/blob/main/DESIGN.md)
-for the complete lifecycle and validation contract.
-
-## License
-
-MIT
+See [DESIGN.md](DESIGN.md) for the exact contract, [the documentation](https://nima.sh/nshconfig/) for guides, and [SKILL.md](SKILL.md) for agent usage.
