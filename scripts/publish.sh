@@ -13,7 +13,7 @@ uv run ruff check src tests examples
 uv run ruff format --check src tests examples
 uv run basedpyright src
 uv run pytest
-uv run nox -s tests
+uv run nox -r -s tests
 uv run sphinx-build -E -W --keep-going -b html docs/source docs/build/html
 
 uv build --clear

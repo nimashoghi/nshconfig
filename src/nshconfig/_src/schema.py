@@ -18,6 +18,7 @@ from pydantic_core import PydanticUndefined
 class Declaration:
     annotation: Any
     default: Any = PydanticUndefined
+    owner: Any = None
 
 
 # Core validators are process-local compiled artifacts, never class pickle state.
@@ -67,12 +68,27 @@ def default(declaration: Declaration) -> Any:
 
 
 def resolve(cls: Any) -> dict[str, Any]:
-    namespace = dict(cls._namespace)
-    namespace[cls.__name__] = cls
-    hints = get_type_hints(cls, localns=namespace, include_extras=True)
-    # Concrete annotations, unlike strings referring to notebook globals, are
-    # carried by value when cloudpickle transports a dynamically defined class.
-    cls.__annotations__ = {name: hints[name] for name in class_annotations(cls)}
+    hints: dict[str, Any] = {}
+    for name, declaration in cls._declarations.items():
+        owner = declaration.owner
+        namespace = dict(owner._namespace)
+        namespace[owner.__name__] = owner
+        module = sys.modules.get(owner.__module__)
+        globalns = vars(module) if module is not None else {}
+
+        def field_hint() -> None:
+            pass
+
+        field_hint.__annotations__ = {"value": declaration.annotation}
+        resolved = get_type_hints(
+            field_hint, globalns=globalns, localns=namespace, include_extras=True
+        )["value"]
+        declaration.annotation = resolved
+        hints[name] = resolved
+    own = class_annotations(cls)
+    cls.__annotations__ = {
+        name: hints.get(name, annotation) for name, annotation in own.items()
+    }
     return hints
 
 

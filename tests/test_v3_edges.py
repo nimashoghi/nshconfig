@@ -172,3 +172,30 @@ def test_computed_container_preserves_source_context_and_is_complete():
     assert r.copied[0].width == 3
     r.group.width = 4
     assert r.finalize().copied[0].width == 4
+
+
+def test_interpolated_containers_read_normalized_source_values():
+    class Run(C.Config):
+        xs: list[Annotated[int, C.AfterValidator(lambda x: x + 1)]] = [1]
+        copied: list[int] = C.interp(lambda c: c.current(Run).xs)
+        nested: dict[str, list[int]] = C.interp(lambda c: {"x": c.current(Run).xs})
+
+    r = Run()
+    assert list(r.xs) == [2]
+    assert list(r.copied) == [2]
+    assert list(r.nested["x"]) == [2]
+    assert r.finalize().to_dict() == {"xs": [2], "copied": [2], "nested": {"x": [2]}}
+
+
+def test_failed_constructor_does_not_take_ownership_of_arguments():
+    class Parent(C.Config):
+        a: Importable
+        b: Importable
+
+    child = Importable()
+    with pytest.raises(C.OwnershipError):
+        Parent(a=child, b=child)
+    second = Importable()
+    c = Parent(a=child, b=second)
+    assert c.a is child
+    assert c.b is second

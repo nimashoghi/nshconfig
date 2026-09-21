@@ -19,7 +19,14 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from pathlib import PurePath
+from pathlib import (
+    Path,
+    PosixPath,
+    PurePath,
+    PurePosixPath,
+    PureWindowsPath,
+    WindowsPath,
+)
 from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, cast
 from uuid import UUID
 
@@ -81,6 +88,9 @@ class _Resolution:
     active: list[tuple[Config, str]] = field(default_factory=list)
     values: dict[tuple[int, str], Any] = field(default_factory=dict)
     finalizing: bool = False
+    token: object = field(default_factory=object)
+    nodes: dict[int, Config] = field(default_factory=dict)
+    inputs: dict[tuple[int, str], Any] = field(default_factory=dict)
 
 
 _SESSION: ContextVar[_Resolution | None] = ContextVar(
@@ -310,6 +320,14 @@ class _List(_Container, MutableSequence[Any]):
         self._replace(items)
 
     @override
+    def append(self, value: Any) -> None:
+        self._replace([*self._items, _prepare(value)])
+
+    @override
+    def clear(self) -> None:
+        self._replace([])
+
+    @override
     def extend(self, values: Iterable[Any]) -> None:
         self._replace([*self._items, *(_prepare(v) for v in values)])
 
@@ -426,13 +444,20 @@ class _Dict(_Container, MutableMapping[Any, Any]):
         return repr(self._items)
 
 
-def _input(value: Any) -> Any:
+def _input(value: Any, *, canonical: bool = False) -> Any:
+    if isinstance(value, (_List, _Dict)) and canonical:
+        value._ensure()
     if isinstance(value, _List):
-        return [_input(item) for item in value._items]
+        items = value._view if canonical else value._items
+        return [_input(item, canonical=canonical) for item in items]
     if isinstance(value, _Dict):
-        return {key: _input(item) for key, item in value._items.items()}
-    if isinstance(value, tuple):
-        return tuple(_input(item) for item in value)
+        items = value._view if canonical else value._items
+        return {key: _input(item, canonical=canonical) for key, item in items.items()}
+    if isinstance(value, (list, tuple)):
+        items = (_input(item, canonical=canonical) for item in value)
+        return tuple(items) if isinstance(value, tuple) else list(items)
+    if isinstance(value, dict):
+        return {key: _input(item, canonical=canonical) for key, item in value.items()}
     return value
 
 
@@ -471,36 +496,39 @@ def _canonical(raw: Any, value: Any, updates: list[tuple[Any, Any]]) -> Any:
 
 
 def _safe_leaf(value: Any) -> Any:
-    if value is None or isinstance(
-        value,
-        (
-            str,
-            bytes,
-            int,
-            float,
-            complex,
-            bool,
-            PurePath,
-            date,
-            datetime,
-            time,
-            timedelta,
-            Decimal,
-            UUID,
-            range,
-            type,
-        ),
-    ):
+    immutable = (
+        str,
+        bytes,
+        int,
+        float,
+        complex,
+        bool,
+        PurePath,
+        Path,
+        PosixPath,
+        WindowsPath,
+        PurePosixPath,
+        PureWindowsPath,
+        date,
+        datetime,
+        time,
+        timedelta,
+        Decimal,
+        UUID,
+        range,
+    )
+    if value is None or type(value) in immutable or isinstance(value, type):
         return value
     if isinstance(value, enum.Enum):
         _safe_leaf(value.value)
         return value
-    if isinstance(value, tuple):
+    if type(value) is tuple:
         return tuple(_safe_leaf(item) for item in value)
-    if isinstance(value, frozenset):
+    if type(value) is frozenset:
         return frozenset(_safe_leaf(item) for item in value)
     raise ConfigError(
-        f"{type(value).__name__} is not a supported immutable leaf; describe mutable state with Config, list, dict, or tuple"
+        f"{type(value).__name__} is not a supported immutable leaf; "
+        "describe mutable state with Config, list, dict, or tuple"
     )
 
 
@@ -516,6 +544,8 @@ class Config:
     _frozen: bool
     _values: dict[str, Any]
     _canonical: dict[str, Any]
+    _copy_inputs: dict[str, Any]
+    _creation_token: object | None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -525,13 +555,10 @@ class Config:
         for base in reversed(cls.__mro__[1:]):
             declarations.update(getattr(base, "_declarations", {}))
             checks.update(dict.fromkeys(getattr(base, "_checks", ())))
-            namespace.update(getattr(base, "_namespace", {}))
+            # Each annotation retains its declaring namespace, not a subclass namespace.
         frame = inspect.currentframe()
         if frame is not None and frame.f_back is not None:
-            # Keep only types, not a live frame or unrelated notebook locals.
-            namespace.update(
-                {k: v for k, v in frame.f_back.f_locals.items() if isinstance(v, type)}
-            )
+            # Capture annotation names, not the frame or unrelated notebook locals.
             for annotation in schema.class_annotations(cls).values():
                 if isinstance(annotation, str):
                     expressions = [annotation]
@@ -559,7 +586,7 @@ class Config:
             if hasattr(Config, name):
                 raise TypeError(f"{name!r} is reserved by Config")
             declarations[name] = schema.Declaration(
-                annotation, cls.__dict__.get(name, PydanticUndefined)
+                annotation, cls.__dict__.get(name, PydanticUndefined), cls
             )
             if name in cls.__dict__:
                 delattr(cls, name)
@@ -570,7 +597,11 @@ class Config:
                 checks[name] = None
         cls._declarations = declarations
         cls._namespace = namespace
-        cls._checks = tuple(checks)
+        cls._checks = tuple(
+            name
+            for name in checks
+            if getattr(getattr(cls, name), "__nshconfig_check__", False)
+        )
 
     @classmethod
     def __get_pydantic_core_schema__(cls, source: Any, handler: Any) -> Any:
@@ -582,17 +613,23 @@ class Config:
         if unknown:
             raise TypeError(f"unknown fields: {', '.join(sorted(unknown))}")
         self._initialize()
+        prepared: list[tuple[str, Any]] = []
         for name, declaration in type(self)._declarations.items():
             if name in values:
                 value = values[name]
             else:
                 value = _clone(schema.default(declaration))
             if value is not PydanticUndefined:
-                self._assign(name, value)
+                prepared.append((name, _prepare(value)))
+        _install(self, prepared, [])
+        self._values.update(prepared)
 
     def _initialize(self) -> None:
         object.__setattr__(self, "_values", {})
         object.__setattr__(self, "_canonical", {})
+        object.__setattr__(self, "_copy_inputs", {})
+        session = _SESSION.get()
+        object.__setattr__(self, "_creation_token", session.token if session else None)
         object.__setattr__(self, "_parent", None)
         object.__setattr__(self, "_key", None)
         object.__setattr__(self, "_frozen", False)
@@ -656,6 +693,10 @@ class Config:
             _SESSION.reset(token)
 
     def _resolve(self, name: str, session: _Resolution) -> Any:
+        session.nodes[id(self)] = self
+        root = _root(self)
+        if not any(root is known for known in session.roots):
+            session.roots.append(root)
         key = (id(self), name)
         if key in session.values:
             return session.values[key]
@@ -674,7 +715,9 @@ class Config:
         try:
             computed = isinstance(raw, _Interpolation)
             value = raw.fn(Context(self)) if computed else _input(raw)
-            value = schema.adapter(type(self), name).validate_python(_input(value))
+            validation_input = _input(value, canonical=computed)
+            session.inputs[key] = _input(validation_input)
+            value = schema.adapter(type(self), name).validate_python(validation_input)
             if computed:
                 value = _computed(value, self, name, session)
             else:
@@ -760,7 +803,8 @@ def _clone(value: Any) -> Any:
     if isinstance(value, Config):
         output = object.__new__(type(value))
         output._initialize()
-        for name, item in value._values.items():
+        inputs = value._copy_inputs if value._frozen else value._values
+        for name, item in inputs.items():
             output._assign(name, _clone(item))
         return output
     if isinstance(value, (_List, list)):
@@ -776,6 +820,35 @@ def _clone(value: Any) -> Any:
     return copy.deepcopy(value)
 
 
+def _capture_input(raw: Any, completed: Any) -> Any:
+    """Keep concrete validation inputs so copying a final cannot normalize twice.
+
+    Config references point into the independent snapshot, never back to the
+    authoring tree. Interpolation callbacks have already become concrete inputs.
+    """
+    if isinstance(completed, (_List, _Dict)):
+        completed = _input(completed)
+    if isinstance(raw, Config):
+        if not isinstance(completed, Config):
+            raise ConfigError("normalization cannot replace Config nodes")
+        return completed
+    if isinstance(raw, (list, tuple, _List)):
+        if not isinstance(completed, (list, tuple, _List)) or len(raw) != len(
+            completed
+        ):
+            raise ConfigError("container normalization must preserve shape")
+        values = [_capture_input(a, b) for a, b in zip(raw, completed)]
+        return tuple(values) if isinstance(raw, tuple) else values
+    if isinstance(raw, (dict, _Dict)):
+        if not isinstance(completed, (dict, _Dict)) or raw.keys() != completed.keys():
+            raise ConfigError("container normalization must preserve keys")
+        return {
+            copy.deepcopy(key): _capture_input(item, completed[key])
+            for key, item in raw.items()
+        }
+    return copy.deepcopy(raw)
+
+
 def _snapshot(value: Any, session: _Resolution) -> Any:
     if isinstance(value, Config):
         result = object.__new__(type(value))
@@ -785,6 +858,12 @@ def _snapshot(value: Any, session: _Resolution) -> Any:
                 value._values[name] if value._frozen else value._resolve(name, session)
             )
             result._assign(name, _snapshot(resolved, session))
+            raw_input = (
+                value._copy_inputs[name]
+                if value._frozen
+                else session.inputs.get((id(value), name), _input(value._values[name]))
+            )
+            result._copy_inputs[name] = _capture_input(raw_input, result._values[name])
         result._frozen = True
         _freeze_containers(result)
         return result
@@ -820,7 +899,7 @@ def _computed_snapshot(
     value: Any, owner: Config, name: str, session: _Resolution
 ) -> Any:
     if isinstance(value, Config):
-        if value._parent is not None:
+        if value._parent is not None or value._creation_token is not session.token:
             return _snapshot(value, session)
         temporary = _clone(value)
         temporary._parent, temporary._key = owner, name
