@@ -1,6 +1,6 @@
 [project]
 name = "nshconfig"
-version = "2.3.0a0"
+version = "3.0.0a0"
 description = "Typed Python configuration for ML runs with explicit drafts and validated interpolation."
 authors = [{ name = "Nima Shoghi", email = "nimashoghi@gmail.com" }]
 readme = "README.md"
@@ -30,8 +30,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-all = ["cloudpickle>=3.1.2", "treescope"]
-treescope = ["treescope"]
+all = ["cloudpickle>=3.1.2"]
 transport = ["cloudpickle>=3.1.2"]
 
 [project.urls]
@@ -42,7 +41,6 @@ repository = "https://github.com/nimashoghi/nshconfig"
 [dependency-groups]
 dev = [
     "basedpyright==1.36.2",
-    "treescope",
     "ruff",
     "pytest",
     "pytest-cov",
@@ -55,6 +53,9 @@ dev = [
     "myst-parser",
     "sphinx-copybutton",
     "twine",
+    "ty==0.0.82",
+    "pyright==1.1.414",
+    "mypy==2.3.1",
 ]
 
 [tool.uv]
@@ -65,15 +66,15 @@ requires = ["uv_build>=0.11.28,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.basedpyright]
-# typing_probes are golden fixtures (deliberate errors), checked explicitly by
-# tests/test_typing.py; project-wide scans must skip them. Setting `exclude`
+# v3_typing contains deliberate errors, checked explicitly by
+# tests/test_v3_typing.py; project-wide scans must skip them. Setting `exclude`
 # REPLACES pyright's defaults, so restate them (node_modules, __pycache__, and
 # dot-dirs like .venv/.nox) or the scan descends into every local venv.
 exclude = [
     "**/node_modules",
     "**/__pycache__",
     "**/.*",
-    "tests/typing_probes",
+    "tests/v3_typing",
 ]
 typeCheckingMode = "standard"
 deprecateTypingAliases = true

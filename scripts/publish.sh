@@ -9,8 +9,8 @@ if ! git diff --quiet || ! git diff --cached --quiet || \
 fi
 
 uv sync --locked --all-extras --all-groups
-uv run ruff check src tests
-uv run ruff format --check src tests
+uv run ruff check src tests examples
+uv run ruff format --check src tests examples
 uv run basedpyright src
 uv run pytest
 uv run nox -s tests
