@@ -14,4 +14,5 @@ guides/project-layout
 guides/typing
 guides/failures
 guides/transport
+guides/publishing
 ```

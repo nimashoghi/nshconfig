@@ -1,0 +1,110 @@
+name: Publish to PyPI
+run-name: Publish nshconfig ${{ inputs.version }}
+
+on:
+    workflow_dispatch:
+        inputs:
+            version:
+                description: Exact version already committed in pyproject.toml
+                required: true
+                type: string
+
+permissions:
+    contents: read
+
+concurrency:
+    group: publish-pypi
+    cancel-in-progress: false
+
+jobs:
+    build:
+        name: Verify and build distributions
+        if: github.ref == 'refs/heads/main'
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            actions: read
+        steps:
+            - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+              with:
+                  persist-credentials: false
+
+            - name: Require successful CI for this commit
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  conclusion="$(gh run list \
+                    --repo "$GITHUB_REPOSITORY" \
+                    --workflow ci.yml --branch main --event push \
+                    --commit "$GITHUB_SHA" --limit 1 \
+                    --json status,conclusion \
+                    --jq '.[0] | select(.status == "completed") | .conclusion')"
+                  if [[ "$conclusion" != success ]]; then
+                    echo "CI must pass for $GITHUB_SHA before publishing. Wait for CI, then rerun this workflow." >&2
+                    exit 1
+                  fi
+
+            - name: Install uv and Python
+              uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+              with:
+                  version: "0.11.28"
+                  python-version: "3.14"
+                  enable-cache: false
+
+            - name: Check the requested release version
+              env:
+                  RELEASE_VERSION: ${{ inputs.version }}
+              run: |
+                  uv run --no-project python - <<'PY'
+                  import os
+                  from pathlib import Path
+                  import tomllib
+
+                  actual = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+                  requested = os.environ["RELEASE_VERSION"]
+                  if requested != actual:
+                      raise SystemExit(f"Requested {requested!r}, but this commit declares {actual!r}")
+                  PY
+
+            - name: Build and check distributions
+              run: |
+                  uv build --clear
+                  uv run --locked twine check dist/*
+
+            - name: Exercise the Protenix example from the wheel
+              run: uv run --isolated --no-project --with dist/*.whl -- python examples/protenix.py
+
+            - name: Exercise the Protenix example from the source distribution
+              run: uv run --isolated --no-project --with dist/*.tar.gz -- python examples/protenix.py
+
+            - name: Store verified distributions
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: dist
+                  path: dist/
+                  if-no-files-found: error
+
+    publish:
+        name: Upload to PyPI
+        needs: build
+        runs-on: ubuntu-latest
+        environment:
+            name: pypi
+            url: https://pypi.org/project/nshconfig/${{ inputs.version }}/
+        permissions:
+            id-token: write
+        steps:
+            - name: Install uv
+              uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+              with:
+                  version: "0.11.28"
+                  enable-cache: false
+
+            - name: Retrieve verified distributions
+              uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+              with:
+                  name: dist
+                  path: dist/
+
+            - name: Publish using the registered Trusted Publisher
+              run: uv publish --trusted-publishing always
