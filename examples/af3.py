@@ -1,8 +1,6 @@
-"""Reduced case study based on boltz-bio/protenix at c28e67887dce.
+"""AF3 configuration example with shared model dimensions and dataset weights.
 
-Shared c_z/n_blocks, pairformer/diffusion settings, and aligned dataset weights
-come from configs/configs_base.py, configs/configs_model_type.py and
-configs/configs_data.py. This example does not import the training stack.
+This reduced example demonstrates composition without importing a training stack.
 """
 
 from __future__ import annotations
@@ -13,12 +11,12 @@ import nshconfig as C
 
 
 class Pairformer(C.Config):
-    c_z: int = C.interp(lambda c: c.root(ProtenixConfig).c_z)
-    n_blocks: int = C.interp(lambda c: c.root(ProtenixConfig).n_blocks)
+    c_z: int = C.interp(lambda c: c.root(AF3Config).c_z)
+    n_blocks: int = C.interp(lambda c: c.root(AF3Config).n_blocks)
 
 
 class Diffusion(C.Config):
-    c_z: int = C.interp(lambda c: c.root(ProtenixConfig).c_z)
+    c_z: int = C.interp(lambda c: c.root(AF3Config).c_z)
 
 
 class Model(C.Config):
@@ -37,7 +35,7 @@ class Data(C.Config):
             raise ValueError("train_sets and train_sample_weights must align")
 
 
-class ProtenixConfig(C.Config):
+class AF3Config(C.Config):
     project: str
     run_name: str
     c_z: Annotated[int, C.Field(gt=0)] = 128
@@ -46,22 +44,22 @@ class ProtenixConfig(C.Config):
     data: Data = Data()
 
 
-def protenix_v2(config: ProtenixConfig) -> None:
+def wide(config: AF3Config) -> None:
     """One root edit propagates to both model branches."""
     config.c_z = 256
 
 
-def experiment() -> ProtenixConfig:
-    config = ProtenixConfig.draft()
-    config.project = "protenix"
+def experiment() -> AF3Config:
+    config = AF3Config.draft()
+    config.project = "af3"
     config.run_name = "wide"
-    protenix_v2(config)
+    wide(config)
     config.data.train_sets.append("distillation")
     config.data.train_sample_weights.append(0.5)
     return config
 
 
-def run(config: ProtenixConfig) -> None:
+def run(config: AF3Config) -> None:
     """Replace this body with the project's ordinary training function."""
     assert config.model.pairformer.c_z == config.model.diffusion.c_z == 256
     assert config.data.train_sample_weights == [1.0, 0.5]

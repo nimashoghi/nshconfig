@@ -13,4 +13,4 @@ Explicit child assignment preserves identity and permits one owner. Use `.copy()
 
 Finalization leaves the draft and its rules intact. Final config fields and nested containers reject mutation at runtime. Static checkers check field types, not completeness or draft/final mutability. Arbitrary mutable opaque leaves and mutable sets are unsupported. Keep callbacks pure, and collect external inputs in builder code.
 
-For late function-local forward annotations, call `Schema.rebuild(namespace={"Child": Child})`. Use optional cloudpickle transport only for trusted short-lived Python payloads. See `DESIGN.md` for the exact lifecycle and container normalization limits, and `examples/protenix.py` for composition and execution without a launcher framework.
+For late function-local forward annotations, call `Schema.rebuild(namespace={"Child": Child})`. Use optional cloudpickle transport only for trusted short-lived Python payloads. See `DESIGN.md` for the exact lifecycle and container normalization limits, and `examples/af3.py` for composition and execution without a launcher framework.

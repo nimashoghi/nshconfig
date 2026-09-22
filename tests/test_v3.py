@@ -8,7 +8,7 @@ import nshconfig as C
 
 
 class Pairformer(C.Config):
-    c_z: int = C.interp(lambda c: c.root(Protenix).c_z)
+    c_z: int = C.interp(lambda c: c.root(AF3).c_z)
     n_blocks: int = C.interp(lambda c: c.nearest(Model).n_blocks)
 
 
@@ -27,7 +27,7 @@ class Data(C.Config):
             raise ValueError("train_sets and weights must align")
 
 
-class Protenix(C.Config):
+class AF3(C.Config):
     project: str
     run_name: str
     c_z: int = 128
@@ -35,15 +35,15 @@ class Protenix(C.Config):
     data: Data = Data()
 
 
-def experiment() -> Protenix:
-    config = Protenix.draft()
-    config.project = "protenix"
+def experiment() -> AF3:
+    config = AF3.draft()
+    config.project = "af3"
     config.run_name = "wide"
     config.c_z = 256
     return config
 
 
-def test_protenix_presets_and_independent_snapshots():
+def test_af3_presets_and_independent_snapshots():
     draft = experiment()
     assert draft.model.pairformer.c_z == 256
     draft.model.n_blocks = 32
@@ -69,7 +69,7 @@ def test_protenix_presets_and_independent_snapshots():
 
 
 def test_required_fields_are_deferred_and_defaults_independent():
-    a, b = Protenix.draft(), Protenix.draft()
+    a, b = AF3.draft(), AF3.draft()
     a.model.n_blocks = 1
     a.data.train_sets.append("other")
     assert b.model.n_blocks == 48
@@ -82,7 +82,7 @@ def test_required_fields_are_deferred_and_defaults_independent():
     with pytest.raises(AttributeError):
         a.typo = 1
     with pytest.raises(TypeError):
-        Protenix(typo=1)
+        AF3(typo=1)
 
 
 def test_declaration_order_canonical_reads_and_override():
@@ -111,10 +111,10 @@ def test_cycles_missing_dependencies_and_context():
 
     with pytest.raises(C.InterpolationError, match=r"Cycle.a.*Cycle.b.*Cycle.a"):
         _ = Cycle().a
-    with pytest.raises(C.InterpolationError, match="Protenix root"):
+    with pytest.raises(C.InterpolationError, match="AF3 root"):
         _ = Pairformer().c_z
-    draft = Protenix.draft()
-    draft.c_z = C.interp(lambda c: len(c.root(Protenix).project))
+    draft = AF3.draft()
+    draft.c_z = C.interp(lambda c: len(c.root(AF3).project))
     with pytest.raises(C.MissingValueError, match="project"):
         _ = draft.model.pairformer.c_z
 

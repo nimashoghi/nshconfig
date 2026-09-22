@@ -19,7 +19,7 @@ class Run(C.Config):
     pairformer: Pairformer = Pairformer()
 
 config = Run.draft()
-config.project = "protenix"
+config.project = "af3"
 config.run_name = "wide"
 config.c_z = 256
 assert config.pairformer.c_z == 256
@@ -30,7 +30,7 @@ assert ready.pairformer.c_z == 256
 assert config.pairformer.c_z == 384
 ```
 
-For short configs, `Run(project="protenix", run_name="wide", c_z=256)` also creates an editable draft. Constructors have checked keyword signatures; `.draft()` permits required fields to be populated later. Both use `.finalize()` before execution.
+For short configs, `Run(project="af3", run_name="wide", c_z=256)` also creates an editable draft. Constructors have checked keyword signatures; `.draft()` permits required fields to be populated later. Both use `.finalize()` before execution.
 
 ## Composition is Python
 
@@ -39,7 +39,7 @@ def wide(config: Run) -> None:
     config.c_z = 256
 
 def experiment() -> Run:
-    config = Run(project="protenix", run_name="wide")
+    config = Run(project="af3", run_name="wide")
     wide(config)
     return config
 
@@ -47,7 +47,7 @@ def experiment() -> Run:
 # train(experiment().finalize())
 ```
 
-The runnable [Protenix case study](examples/protenix.py) demonstrates shared model dimensions, presets, nested configs, and training-set/weight validation. It is a reduced migration example, not a full Protenix conversion.
+The runnable [AF3 example](examples/af3.py) demonstrates shared model dimensions, presets, nested configs, and training-set/weight validation in a reduced configuration.
 
 ## Validation and ownership
 
