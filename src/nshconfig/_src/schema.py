@@ -88,7 +88,7 @@ def is_classvar(annotation: Any, owner: Any) -> bool:
                 globalns,
                 localns,
             )
-        except NameError:
+        except (NameError, AttributeError):
             return False
     return annotation is ClassVar or get_origin(annotation) is ClassVar
 

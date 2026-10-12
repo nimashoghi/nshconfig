@@ -37,6 +37,7 @@ def test_class_annotations_and_inline_validators(future: str):
         future
         + """
 from typing import Annotated, ClassVar, ClassVar as CV
+import __main__
 import typing_extensions
 import nshconfig as C
 
@@ -70,6 +71,14 @@ class Child(Outer):
     pass
 
 assert Child().finalize().to_dict() == draft.finalize().to_dict()
+
+class LateRun(C.Config):
+    child: "__main__.Later"
+
+class Later(C.Config):
+    value: int = 4
+
+assert LateRun(child=Later()).finalize().child.value == 4
 """
     )
     result = subprocess.run(
