@@ -1,6 +1,6 @@
 [project]
 name = "nshconfig"
-version = "3.0.0a0"
+version = "3.0.0"
 description = "Typed Python configuration for ML runs with explicit drafts and validated interpolation."
 authors = [{ name = "Nima Shoghi", email = "nimashoghi@gmail.com" }]
 readme = "README.md"
@@ -17,7 +17,7 @@ keywords = [
     "interpolation",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",

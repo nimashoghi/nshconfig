@@ -22,7 +22,7 @@ The GitHub `pypi` environment allows deployments from the `main` branch. Only th
 3. Dispatch the workflow with the exact version:
 
    ```bash
-   gh workflow run publish.yml --repo nimashoghi/nshconfig --ref main -f version=3.0.0a0
+   gh workflow run publish.yml --repo nimashoghi/nshconfig --ref main -f version=3.0.0
    ```
 
 4. Check the workflow result and verify the release on PyPI. The `dist` workflow artifact contains the distributions that were uploaded.

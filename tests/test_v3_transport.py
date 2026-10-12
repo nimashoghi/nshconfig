@@ -17,7 +17,7 @@ def test_notebook_schema_cross_process(tmp_path: Path, future: str):
         + """
 import os
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, ClassVar as CV
 import cloudpickle
 import nshconfig as C
 
@@ -25,9 +25,15 @@ class Leaf(C.Config):
     width: int = C.interp(lambda c: c.root(Run).width)
 
 class Run(C.Config):
-    width: Annotated[int, C.AfterValidator(abs)]
+    tag: CV[str] = 'run'
+
+    class Options(C.Config):
+        count: Annotated[int, C.AfterValidator(lambda value: value + 1)] = 1
+
+    width: Annotated[int, C.AfterValidator(lambda value: abs(value))]
     leaves: list[Leaf] = [Leaf()]
     values: dict[str, list[int]] = {'x': [1]}
+    options: Options = Options()
 
     @C.check
     def positive(self) -> None:
@@ -46,11 +52,12 @@ import cloudpickle
 import nshconfig as C
 r, f, Run = cloudpickle.loads(Path(os.environ['NSHCONFIG_PAYLOAD']).read_bytes())
 assert C.is_draft(r) and not C.is_draft(f)
+assert Run.tag == r.tag == f.tag == 'run'
 r.width = -8
 r.values['x'].append(2)
 assert r.leaves[0].width == 8
-assert r.finalize().to_dict() == {'width': 8, 'leaves': [{'width': 8}], 'values': {'x': [1, 2]}}
-assert f.to_dict() == {'width': 4, 'leaves': [{'width': 4}], 'values': {'x': [1]}}
+assert r.finalize().to_dict() == {'width': 8, 'leaves': [{'width': 8}], 'values': {'x': [1, 2]}, 'options': {'count': 2}}
+assert f.to_dict() == {'width': 4, 'leaves': [{'width': 4}], 'values': {'x': [1]}, 'options': {'count': 2}}
 assert Run(width=2).leaves[0].width == 2
 try:
     f.values['x'].append(3)

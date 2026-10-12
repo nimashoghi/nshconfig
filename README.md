@@ -3,7 +3,7 @@
 Typed Python configuration with editable drafts, live interpolation, and independent read-only snapshots. Config files, presets, and execution are ordinary Python modules and functions.
 
 ```bash
-pip install 'nshconfig==3.0.0a0'
+pip install 'nshconfig==3.0.0'
 ```
 
 ```python
@@ -47,7 +47,7 @@ def experiment() -> Run:
 # train(experiment().finalize())
 ```
 
-The runnable [AF3 example](examples/af3.py) demonstrates shared model dimensions, presets, nested configs, and training-set/weight validation in a reduced configuration.
+The runnable [AF3 example](https://github.com/nimashoghi/nshconfig/blob/main/examples/af3.py) demonstrates shared model dimensions, presets, nested configs, and training-set/weight validation in a reduced configuration.
 
 ## Validation and ownership
 
@@ -73,4 +73,4 @@ The same schema type describes drafts and finals. ty, Pyright, and mypy check na
 
 Python 3.10-3.14 and Pydantic 2.13 through the latest 2.x are supported. Install `nshconfig[transport]` for trusted cloudpickle transport of notebook-defined schemas. v3 is an intentional breaking redesign of v2.
 
-See [DESIGN.md](DESIGN.md) for the exact contract, [the documentation](https://nima.sh/nshconfig/) for guides, and [SKILL.md](SKILL.md) for agent usage.
+See [the design contract](https://github.com/nimashoghi/nshconfig/blob/main/DESIGN.md), [the upgrade guide](https://nima.sh/nshconfig/guides/upgrading.html), [the documentation](https://nima.sh/nshconfig/) for guides, and [SKILL.md](https://github.com/nimashoghi/nshconfig/blob/main/SKILL.md) for agent usage.

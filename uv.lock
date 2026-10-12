@@ -1341,7 +1341,7 @@ wheels = [
 
 [[package]]
 name = "nshconfig"
-version = "3.0.0a0"
+version = "3.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
