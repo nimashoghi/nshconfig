@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 import inspect
 import sys
 from dataclasses import dataclass
-from typing import Any, ClassVar, cast, get_origin, get_type_hints
-from collections.abc import Callable
+from typing import Any, ClassVar, ForwardRef, cast, get_args, get_origin, get_type_hints
+from collections.abc import Callable, Iterable, Iterator
 from weakref import WeakKeyDictionary
 
 from pydantic import ConfigDict, TypeAdapter
@@ -29,15 +30,67 @@ def class_annotations(cls: type) -> dict[str, Any]:
     if sys.version_info >= (3, 14):
         import annotationlib
 
-        return annotationlib.get_annotations(cls, format=annotationlib.Format.STRING)
+        return annotationlib.get_annotations(
+            cls, format=annotationlib.Format.FORWARDREF
+        )
     return inspect.get_annotations(cls, eval_str=False)
 
 
-def is_classvar(annotation: Any) -> bool:
-    return get_origin(annotation) is ClassVar or (
-        isinstance(annotation, str)
-        and annotation.replace("typing.", "").startswith("ClassVar[")
-    )
+def annotation_names(annotations: Iterable[Any]) -> Iterator[str]:
+    """Find names needed to retain function-local forward annotation scopes."""
+    pending = list(annotations)
+    while pending:
+        annotation = pending.pop()
+        if isinstance(annotation, ForwardRef):
+            annotation = annotation.__forward_arg__
+        if not isinstance(annotation, str):
+            pending.extend(get_args(annotation))
+            continue
+        try:
+            expression = ast.parse(annotation, mode="eval")
+        except SyntaxError:
+            # Literal string metadata need not be a Python expression.
+            continue
+        for node in ast.walk(expression):
+            if isinstance(node, ast.Name):
+                yield node.id
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                pending.append(node.value)
+
+
+def namespaces(owner: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    module = sys.modules.get(owner.__module__)
+    globalns = dict(vars(module)) if module is not None else {}
+    # Functions created while evaluating a postponed annotation must also see
+    # captured function locals, rather than only the defining module's globals.
+    globalns.update(owner._namespace)
+    globalns.update(owner._namespace_overrides)
+    localns = {**globalns, **vars(owner), **owner._namespace_overrides}
+    localns[owner.__name__] = owner
+    return globalns, localns
+
+
+def is_classvar(annotation: Any, owner: Any) -> bool:
+    if isinstance(annotation, str):
+        expression = ast.parse(annotation, mode="eval").body
+        while isinstance(expression, ast.Constant) and isinstance(
+            expression.value, str
+        ):
+            expression = ast.parse(expression.value, mode="eval").body
+        # Only resolve the outer type: ClassVar["DefinedLater"] is still a
+        # class variable even when its parameter cannot yet be resolved.
+        if isinstance(expression, ast.Subscript):
+            expression = expression.value
+        globalns, localns = namespaces(owner)
+        try:
+            annotation = eval(
+                compile(ast.Expression(expression), "<annotation>", "eval"),
+                globalns,
+                localns,
+            )
+        except (NameError, AttributeError):
+            return False
+    return annotation is ClassVar or get_origin(annotation) is ClassVar
 
 
 def adapter(cls: Any, name: str) -> TypeAdapter[Any]:
@@ -71,17 +124,12 @@ def resolve(cls: Any) -> dict[str, Any]:
     hints: dict[str, Any] = {}
     for name, declaration in cls._declarations.items():
         owner = declaration.owner
-        namespace = dict(owner._namespace)
-        namespace[owner.__name__] = owner
-        module = sys.modules.get(owner.__module__)
-        globalns = vars(module) if module is not None else {}
-
-        def field_hint() -> None:
-            pass
-
-        field_hint.__annotations__ = {"value": declaration.annotation}
+        globalns, localns = namespaces(owner)
+        field_hint = type(
+            "_FieldHint", (), {"__annotations__": {"value": declaration.annotation}}
+        )
         resolved = get_type_hints(
-            field_hint, globalns=globalns, localns=namespace, include_extras=True
+            field_hint, globalns=globalns, localns=localns, include_extras=True
         )["value"]
         declaration.annotation = resolved
         hints[name] = resolved

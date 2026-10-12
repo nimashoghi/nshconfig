@@ -7,6 +7,7 @@ Typed Python drafts, live interpolation, and independent read-only snapshots. Co
 
 installation
 quickstart
+guides/upgrading
 contract
 guides/drafts
 guides/interpolation

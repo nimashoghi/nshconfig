@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import copy
 import enum
 import inspect
@@ -488,7 +487,7 @@ def _canonical(raw: Any, value: Any, updates: list[tuple[Any, Any]]) -> Any:
         if not isinstance(value, tuple) or len(raw) != len(value):
             raise ConfigError("tuple normalization must preserve shape")
         return tuple(_canonical(a, b, updates) for a, b in zip(raw, value))
-    if isinstance(value, (Config, list, dict)) and value is not raw:
+    if isinstance(value, (Config, list, dict, tuple)) and value is not raw:
         raise ConfigError(
             "normalizers cannot introduce config/container nodes; assign them directly or use interp"
         )
@@ -538,6 +537,7 @@ class Config:
 
     _declarations: ClassVar[dict[str, schema.Declaration]] = {}
     _namespace: ClassVar[dict[str, Any]] = {}
+    _namespace_overrides: ClassVar[dict[str, Any]] = {}
     _checks: ClassVar[tuple[str, ...]] = ()
     _parent: Any
     _key: Any
@@ -556,32 +556,20 @@ class Config:
             declarations.update(getattr(base, "_declarations", {}))
             checks.update(dict.fromkeys(getattr(base, "_checks", ())))
             # Each annotation retains its declaring namespace, not a subclass namespace.
+        annotations = schema.class_annotations(cls)
         frame = inspect.currentframe()
         if frame is not None and frame.f_back is not None:
             # Capture annotation names, not the frame or unrelated notebook locals.
-            for annotation in schema.class_annotations(cls).values():
-                if isinstance(annotation, str):
-                    expressions = [annotation]
-                    while expressions:
-                        expression = ast.parse(expressions.pop(), mode="eval")
-                        for node in ast.walk(expression):
-                            if isinstance(node, ast.Name):
-                                if node.id in frame.f_back.f_locals:
-                                    namespace[node.id] = frame.f_back.f_locals[node.id]
-                                elif node.id in frame.f_back.f_globals:
-                                    namespace[node.id] = frame.f_back.f_globals[node.id]
-                            elif isinstance(node, ast.Constant) and isinstance(
-                                node.value, str
-                            ):
-                                try:
-                                    ast.parse(node.value, mode="eval")
-                                except SyntaxError:
-                                    pass
-                                else:
-                                    expressions.append(node.value)
+            for name in schema.annotation_names(annotations.values()):
+                if name in frame.f_back.f_locals:
+                    namespace[name] = frame.f_back.f_locals[name]
+                elif name in frame.f_back.f_globals:
+                    namespace[name] = frame.f_back.f_globals[name]
         del frame
-        for name, annotation in schema.class_annotations(cls).items():
-            if name.startswith("_") or schema.is_classvar(annotation):
+        cls._namespace = namespace
+        cls._namespace_overrides = {}
+        for name, annotation in annotations.items():
+            if name.startswith("_") or schema.is_classvar(annotation, cls):
                 continue
             if hasattr(Config, name):
                 raise TypeError(f"{name!r} is reserved by Config")
@@ -596,7 +584,6 @@ class Config:
             if getattr(value, "__nshconfig_check__", False):
                 checks[name] = None
         cls._declarations = declarations
-        cls._namespace = namespace
         cls._checks = tuple(
             name
             for name in checks
@@ -741,7 +728,7 @@ class Config:
     def rebuild(cls, *, namespace: Mapping[str, Any] | None = None) -> None:
         """Resolve late annotations; supply locals for function-local forward types."""
         if namespace:
-            cls._namespace.update(namespace)
+            cls._namespace_overrides.update(namespace)
         schema.resolve(cls)
         schema.clear_cache(cls)
 
